@@ -1,0 +1,7 @@
+[project]
+name = "vantage"
+version = "0.1.0"
+description = "Self-hosted evaluation and observability for LLM agents"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []

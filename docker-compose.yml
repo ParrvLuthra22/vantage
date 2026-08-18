@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vantage
+      POSTGRES_PASSWORD: vantage
+      POSTGRES_DB: vantage
+    ports:
+      - "5432:5432"
+    volumes:
+      - vantage_pgdata:/var/lib/postgresql/data
+
+volumes:
+  vantage_pgdata:
