@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vantage
+          POSTGRES_PASSWORD: vantage
+          POSTGRES_DB: vantage
+        ports:
+          - 5432:5432
+        # The job talks to Postgres over the mapped port, so wait until it is
+        # actually accepting connections rather than merely started.
+        options: >-
+          --health-cmd "pg_isready -U vantage -d vantage"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://vantage:vantage@localhost:5432/vantage
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Create virtualenv
+        run: uv venv --python 3.11
+
+      - name: Install packages and dev tooling
+        run: |
+          uv pip install -e ./packages/api
+          uv pip install -e ./packages/sdk
+          uv pip install pytest pytest-asyncio httpx ruff
+
+      - name: Lint
+        run: |
+          source .venv/bin/activate
+          ruff check .
+
+      - name: Test
+        run: |
+          source .venv/bin/activate
+          pytest -q
+
+      - name: End-to-end smoke
+        run: |
+          source .venv/bin/activate
+          uvicorn vantage_api.main:app --port 8000 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:8000/health
+          python examples/vesper_integration/main.py
+          bash scripts/verify_week1.sh
+
+  build-sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build the SDK distribution
+        run: uv build
+        working-directory: packages/sdk
+
+      - name: Check the built artifacts
+        run: |
+          uvx twine check dist/*
+          ls -l dist
+        working-directory: packages/sdk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vantage-sdk-dist
+          path: packages/sdk/dist/*
