@@ -34,6 +34,11 @@ packages/**/.env.*
 # Local DB switcher holds the real Neon URL; only the .example is committed.
 scripts/switch_db.sh
 
+# Next.js local env files (the bare `.env`/`.env.*` rules above already match at
+# any depth; these are spelled out because Next's own convention is .env*.local)
+.env*.local
+!.env.example
+
 # Testing / coverage
 .pytest_cache/
 .tox/
