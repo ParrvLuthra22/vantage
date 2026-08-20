@@ -25,6 +25,14 @@ ENV/
 .env
 .env.*
 !.env.example
+# Explicit belt-and-braces for the monorepo packages. The bare `.env` rule above
+# already matches at any depth, but spelling these out means a future negation
+# rule can't accidentally re-expose real credentials.
+packages/**/.env
+packages/**/.env.*
+!packages/**/.env.example
+# Local DB switcher holds the real Neon URL; only the .example is committed.
+scripts/switch_db.sh
 
 # Testing / coverage
 .pytest_cache/

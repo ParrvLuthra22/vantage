@@ -24,6 +24,7 @@ docker compose up -d                      # Postgres 16 on :5432
 
 cd packages/api
 uv pip install -e .
+cp .env.example .env                      # local settings; .env is gitignored
 alembic upgrade head                      # apply schema migrations
 uvicorn vantage_api.main:app --port 8000  # API on :8000
 ```

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Copy to scripts/switch_db.sh and fill in your real Neon URL.
+# scripts/switch_db.sh is gitignored — never commit the prod credentials.
+#
+# Usage: source scripts/switch_db.sh local|prod
+#
+# Must be sourced, not executed: a child process cannot export into your shell.
+
+if [ "$1" = "prod" ]; then
+  export DATABASE_URL="postgresql+asyncpg://user:pass@ep-xxx.aws.neon.tech/vantage?sslmode=require"
+  echo "Switched to PROD (Neon)"
+else
+  export DATABASE_URL="postgresql+asyncpg://vantage:vantage@localhost:5432/vantage"
+  echo "Switched to LOCAL"
+fi
