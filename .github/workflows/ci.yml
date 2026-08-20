@@ -59,6 +59,15 @@ jobs:
           source .venv/bin/activate
           ruff check .
 
+      # The app no longer creates tables at startup — Alembic owns the schema.
+      # This mirrors the production deploy order: migrate, then serve.
+      - name: Run migrations
+        run: |
+          source "$GITHUB_WORKSPACE/.venv/bin/activate"
+          alembic upgrade head
+          alembic current
+        working-directory: packages/api
+
       - name: Test
         run: |
           source .venv/bin/activate

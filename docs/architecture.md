@@ -229,7 +229,45 @@ roadmap item, not an oversight.
 
 ---
 
-## 7. Known gaps
+## 7. Schema migrations
+
+Alembic owns the schema. The app does **not** create tables at startup — an earlier
+version called `Base.metadata.create_all` in the FastAPI lifespan, which only ever
+issued `CREATE TABLE` for tables it could not find. Column additions, type changes,
+and new indexes on existing tables were silently ignored, so once a table existed in
+an environment its shape was frozen while the code kept moving.
+
+```bash
+cd packages/api
+alembic upgrade head          # apply everything pending
+alembic current               # what this database is at
+alembic history               # the full chain
+alembic downgrade -1          # step back one revision
+```
+
+`alembic/env.py` overrides `sqlalchemy.url` from `vantage_api.config.settings`, so
+migrations follow `DATABASE_URL` in every environment and credentials live in exactly
+one place. It also imports `vantage_api.models` purely for the side effect of
+registering `Trace` and `Span` on `Base.metadata` — without that import, autogenerate
+would compare against an empty metadata object and cheerfully emit a migration that
+drops both tables.
+
+**Deploy order is migrate-then-serve.** `alembic upgrade head` must complete before
+any process that serves traffic starts, and it belongs in the deploy step rather than
+in application startup: running migrations from inside the app means every replica
+races to apply the same DDL on boot. This is informal for now and becomes a formal
+deploy pipeline later.
+
+Autogenerate is a starting point, not an authority. Review every generated revision
+before committing it — in particular it can flatten a GIN index to a btree, which
+silently destroys `attributes` query performance while leaving an index in place that
+looks correct at a glance. The initial revision here was checked against
+`pg_indexes`: `ix_spans_attributes_gin` is `USING gin` and
+`ix_traces_project_start_desc` retains `start_time DESC`.
+
+---
+
+## 8. Known gaps
 
 Honest list of what is not done yet.
 
@@ -237,10 +275,6 @@ Honest list of what is not done yet.
   even when child spans error. Ingest creates trace rows and rolls up cost/tokens but
   never finalizes them, so trace-level duration and "show me failed traces" are not
   answerable from the `traces` table. Span-level error data *is* recorded correctly.
-- **Schema changes need migrations.** Startup uses `Base.metadata.create_all`, which
-  only creates missing tables. It ignores column additions, type changes, and new
-  indexes on existing tables, so once a table exists its shape is frozen. Alembic
-  lands in Week 2.
 - **Export failures are invisible.** The exporter swallows HTTP errors without
   inspecting status, so a bad API key or a rejected batch looks identical to success.
   Dropped-span and failed-request counters are needed before this runs anywhere real.

@@ -22,7 +22,9 @@ Postgres and the API must both be running:
 
 ```bash
 docker compose up -d
-cd packages/api && uvicorn vantage_api.main:app --port 8000
+cd packages/api
+alembic upgrade head
+uvicorn vantage_api.main:app --port 8000
 ```
 
 The example targets `http://localhost:8000` with the development key

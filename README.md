@@ -24,10 +24,12 @@ docker compose up -d                      # Postgres 16 on :5432
 
 cd packages/api
 uv pip install -e .
+alembic upgrade head                      # apply schema migrations
 uvicorn vantage_api.main:app --port 8000  # API on :8000
 ```
 
-Tables are created on startup. Check it's alive:
+The schema is owned by Alembic — run `alembic upgrade head` before starting the
+app, and as the first step of any deploy. Check it's alive:
 
 ```bash
 curl http://localhost:8000/health

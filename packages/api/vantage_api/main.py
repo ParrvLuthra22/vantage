@@ -6,23 +6,23 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from vantage_api.config import settings
-from vantage_api.database import Base, engine
+from vantage_api.database import engine
 from vantage_api.routes import router as traces_router
 
 API_VERSION = "0.1.0"
 
 
-# create_all is fine for Week 1 ONLY. Week 2 introduces Alembic migrations.
-# create_all just issues CREATE TABLE IF NOT EXISTS for tables it doesn't find —
-# it does not handle schema *changes*. Adding a column, changing a type, or
-# adding an index to an existing table is silently ignored, so once a table
-# exists in an environment its shape is frozen and the code drifts away from the
-# database with no error to warn you. Migrations replace this entirely.
+# Schema is owned by Alembic, not by the app. `Base.metadata.create_all` used to
+# run here; it only ever issued CREATE TABLE for tables it could not find and
+# silently ignored every other kind of change — added columns, altered types,
+# new indexes — so once a table existed its shape was frozen and the code drifted
+# away from the database with no error to warn you.
+#
+# Run `alembic upgrade head` before starting the app. In production that belongs
+# in the deploy step, ahead of any process that serves traffic.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create missing tables on startup, dispose of the pool on shutdown."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Dispose of the connection pool on shutdown."""
     yield
     await engine.dispose()
 
