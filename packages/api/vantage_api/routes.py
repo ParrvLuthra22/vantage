@@ -3,6 +3,8 @@
 import secrets
 import uuid
 from collections import defaultdict
+from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
@@ -16,6 +18,20 @@ from vantage_api.models import Span, Trace
 from vantage_api.schemas import SpanBatch, TraceDetail, TraceOut
 
 router = APIRouter(prefix="/traces", tags=["traces"])
+
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Coerce a datetime to timezone-aware UTC for safe comparison.
+
+    Timestamps read back from a `timestamptz` column are always aware, but a
+    client is free to post naive ones. Comparing the two raises TypeError, and
+    the monotonic end_time check below does exactly that comparison — so a
+    single naive timestamp would turn ingest into a 500. Naive input is assumed
+    to be UTC here.
+    """
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
 async def verify_api_key(authorization: str | None = Header(default=None)) -> None:
@@ -82,6 +98,21 @@ async def ingest_spans(batch: SpanBatch, db: AsyncSession = Depends(get_db)) -> 
     for span in unique_spans:
         spans_by_trace[span.trace_id].append(span)
 
+    # Per-trace aggregates for this batch. Unlike the cost/token rollup below,
+    # these are computed over *every* incoming span rather than only the newly
+    # inserted ones: `max` and `or` are idempotent, so replaying a batch
+    # recomputes the same value instead of compounding it.
+    batch_max_end: dict[uuid.UUID, datetime] = {}
+    batch_has_error: dict[uuid.UUID, bool] = {}
+    for span in unique_spans:
+        end = _as_utc(span.end_time)
+        if end is not None:
+            current = batch_max_end.get(span.trace_id)
+            if current is None or end > current:
+                batch_max_end[span.trace_id] = end
+        if span.status == "error":
+            batch_has_error[span.trace_id] = True
+
     new_traces = []
     for trace_id in new_ids:
         earliest = min(spans_by_trace[trace_id], key=lambda s: s.start_time)
@@ -93,6 +124,10 @@ async def ingest_spans(batch: SpanBatch, db: AsyncSession = Depends(get_db)) -> 
             # than mislabelling a child span as the root.
             root_span_id=earliest.span_id if earliest.parent_span_id is None else None,
             start_time=earliest.start_time,
+            # Seeded from this batch; both fields advance monotonically as
+            # later batches for the same trace arrive.
+            end_time=batch_max_end.get(trace_id),
+            status="error" if batch_has_error.get(trace_id) else "ok",
             total_cost_usd=0.0,
             total_tokens=0,
         )
@@ -127,6 +162,24 @@ async def ingest_spans(batch: SpanBatch, db: AsyncSession = Depends(get_db)) -> 
             trace.total_tokens += span.input_tokens
         if span.output_tokens is not None:
             trace.total_tokens += span.output_tokens
+
+    # Advance end_time and status on traces that already existed. Spans for one
+    # trace arrive across multiple flushes — an in-progress agent emits early
+    # spans long before it finishes — so these must only ever move forward:
+    # end_time to a later timestamp, status from "ok" to "error". A late batch
+    # carrying an earlier end_time or a healthy span must not undo either.
+    for trace_id, trace in traces_by_id.items():
+        if trace_id in new_ids:
+            continue  # already seeded above from this same batch
+
+        candidate_end = batch_max_end.get(trace_id)
+        if candidate_end is not None:
+            current_end = _as_utc(trace.end_time)
+            if current_end is None or candidate_end > current_end:
+                trace.end_time = candidate_end
+
+        if batch_has_error.get(trace_id) and trace.status == "ok":
+            trace.status = "error"
 
     await db.commit()
 
