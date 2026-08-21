@@ -187,7 +187,10 @@ async def ingest_spans(batch: SpanBatch, db: AsyncSession = Depends(get_db)) -> 
 @router.get("/", response_model=list[TraceOut], dependencies=[Depends(verify_api_key)])
 async def list_traces(
     project: str = "default",
-    limit: int = Query(50, le=200),
+    # ge=1 matters as much as le=200: without a lower bound a negative limit
+    # passes validation and reaches Postgres, which rejects it with
+    # "LIMIT must not be negative" as an unhandled 500 rather than a 422.
+    limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> list[Trace]:
     """List the most recent traces for a project, newest first."""

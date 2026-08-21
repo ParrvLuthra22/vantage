@@ -3,6 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from vantage_api.config import settings
 from vantage_api.main import app
 from vantage_api.schemas import MAX_BATCH_SPANS, SpanBatch
 
@@ -58,3 +59,14 @@ def test_sdk_and_api_wire_contracts_match():
     for name, sdk_field in SpanCreate.model_fields.items():
         api_field = SpanIn.model_fields[name]
         assert sdk_field.annotation == api_field.annotation, name
+
+
+@pytest.mark.parametrize("limit,expected", [(-5, 422), (0, 422), (1, 200), (200, 200), (201, 422)])
+def test_list_traces_limit_is_bounded_both_ways(client, limit, expected):
+    """A negative limit used to reach Postgres and 500 on 'LIMIT must not be negative'."""
+    r = client.get(
+        "/traces/",
+        params={"project": "nonexistent", "limit": limit},
+        headers={"Authorization": f"Bearer {settings.api_key}"},
+    )
+    assert r.status_code == expected
