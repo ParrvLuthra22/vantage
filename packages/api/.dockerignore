@@ -1,0 +1,16 @@
+# Keep secrets and local state out of the build context entirely. Nothing here
+# is COPYed today, but a context that never contains .env cannot leak it into a
+# layer through a future wildcard COPY.
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+tests/
+dist/
+build/
+*.egg-info/
