@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { Span } from "@/lib/api/types";
-import { formatCost, formatDuration, formatTokens } from "@/lib/utils/format";
+import { formatDuration } from "@/lib/utils/format";
 
 /**
  * Span waterfall.
@@ -31,6 +31,8 @@ interface WaterfallProps {
   spans: Span[];
   traceStart: string;
   traceEnd: string | null;
+  selectedId: string | null;
+  onSelect: (spanId: string | null) => void;
 }
 
 interface LayoutRow {
@@ -91,7 +93,13 @@ function buildLayout(spans: Span[], traceStartMs: number): LayoutRow[] {
   return rows;
 }
 
-export function SpanWaterfall({ spans, traceStart, traceEnd }: WaterfallProps) {
+export function SpanWaterfall({
+  spans,
+  traceStart,
+  traceEnd,
+  selectedId,
+  onSelect,
+}: WaterfallProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const traceStartMs = new Date(traceStart).getTime();
@@ -163,20 +171,40 @@ export function SpanWaterfall({ spans, traceStart, traceEnd }: WaterfallProps) {
           );
           const isError = row.span.status === "error";
           const isHovered = hoveredId === row.span.span_id;
+          const isSelected = selectedId === row.span.span_id;
 
           return (
             <g
               key={row.span.span_id}
               onMouseEnter={() => setHoveredId(row.span.span_id)}
               onMouseLeave={() => setHoveredId(null)}
+              // Clicking the selected row again clears it, so the panel can be
+              // dismissed without hunting for a close control.
+              onClick={() => onSelect(isSelected ? null : row.span.span_id)}
               className="cursor-pointer"
+              role="button"
+              tabIndex={0}
+              aria-pressed={isSelected}
+              aria-label={`Span ${row.span.name}`}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect(isSelected ? null : row.span.span_id);
+                }
+              }}
             >
               <rect
                 x={0}
                 y={y - 12}
                 width={TOTAL_WIDTH}
                 height={ROW_HEIGHT}
-                fill={isHovered ? "hsl(0 0% 8%)" : "transparent"}
+                fill={
+                  isSelected
+                    ? "hsl(0 0% 12%)"
+                    : isHovered
+                      ? "hsl(0 0% 8%)"
+                      : "transparent"
+                }
               />
               <text x={8 + row.depth * 16} y={y + 4} fill="hsl(0 0% 90%)">
                 {row.span.name.length > 32
@@ -189,8 +217,17 @@ export function SpanWaterfall({ spans, traceStart, traceEnd }: WaterfallProps) {
                 width={barW}
                 height={20}
                 rx={2}
-                fill={isError ? "hsl(0 84% 60% / 0.8)" : "hsl(24 100% 55% / 0.7)"}
+                fill={
+                  isError
+                    ? isSelected
+                      ? "hsl(0 84% 60% / 1)"
+                      : "hsl(0 84% 60% / 0.8)"
+                    : isSelected
+                      ? "hsl(24 100% 55% / 1)"
+                      : "hsl(24 100% 55% / 0.7)"
+                }
                 stroke={isError ? "hsl(0 84% 60%)" : "hsl(24 100% 55%)"}
+                strokeWidth={isSelected ? 2 : 1}
               />
               {barW > 40 && (
                 <text x={barX + barW + 8} y={y + 4} fill="hsl(0 0% 60%)">
@@ -202,30 +239,6 @@ export function SpanWaterfall({ spans, traceStart, traceEnd }: WaterfallProps) {
         })}
       </svg>
 
-      {hoveredId && (
-        <HoverPanel span={spans.find((s) => s.span_id === hoveredId)!} />
-      )}
-    </div>
-  );
-}
-
-function HoverPanel({ span }: { span: Span }) {
-  return (
-    <div className="mt-4 rounded-md bg-secondary/40 p-3 text-xs">
-      <div className="font-mono text-foreground font-medium">{span.name}</div>
-      <div className="mt-1 flex gap-4 text-muted-foreground">
-        <span>
-          span_id: <span className="font-mono">{span.span_id.slice(0, 12)}</span>
-        </span>
-        <span>status: {span.status}</span>
-        {span.model && <span>model: {span.model}</span>}
-        {span.input_tokens != null && (
-          <span>
-            tokens: {formatTokens(span.input_tokens + (span.output_tokens ?? 0))}
-          </span>
-        )}
-        {span.cost_usd != null && <span>cost: {formatCost(span.cost_usd)}</span>}
-      </div>
     </div>
   );
 }
