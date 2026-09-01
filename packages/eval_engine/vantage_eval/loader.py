@@ -1,34 +1,92 @@
-"""Load eval suites and scenarios from YAML on disk.
-
-A suite is a directory: `suite.yaml` holds the EvalSuite fields (name,
-description, agent_target), and `scenarios/*.yaml` each hold one Scenario.
-Kept separate from models.py so the engine's runtime types don't carry any
-knowledge of the filesystem layout they were loaded from.
-"""
+"""Load and validate suite + scenario YAML files."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
 from vantage_eval.models import Rubric, Scenario
 
 
-def load_scenario(path: Path) -> Scenario:
-    """Parse one scenario YAML file into a Scenario."""
-    data: dict[str, Any] = yaml.safe_load(path.read_text())
-    rubric_data = data.pop("rubric", {})
-    return Scenario(rubric=Rubric(**rubric_data), **data)
+@dataclass
+class Suite:
+    """A loaded suite with its scenarios."""
+    name: str
+    description: str
+    agent_target: str
+    scenarios: list[Scenario]
+    root_path: Path
 
 
-def load_suite(suite_dir: Path) -> tuple[dict[str, Any], list[Scenario]]:
-    """Load a suite's `suite.yaml` config and every scenario under `scenarios/`.
+class SuiteLoadError(Exception):
+    """Raised when a suite fails to load or validate."""
 
-    Scenarios are sorted by filename so suite runs are reproducible.
+
+def load_suite(suite_path: Path | str) -> Suite:
     """
-    suite_config: dict[str, Any] = yaml.safe_load((suite_dir / "suite.yaml").read_text())
-    scenarios_dir = suite_dir / "scenarios"
-    scenario_paths = sorted(scenarios_dir.glob("*.yaml")) if scenarios_dir.exists() else []
-    scenarios = [load_scenario(p) for p in scenario_paths]
-    return suite_config, scenarios
+    Load a suite from disk. `suite_path` points at a directory containing
+    suite.yaml and a scenarios/ subdirectory.
+    """
+    suite_path = Path(suite_path)
+    if not suite_path.is_dir():
+        raise SuiteLoadError(f"Suite path {suite_path} is not a directory")
+
+    manifest_path = suite_path / "suite.yaml"
+    scenarios_dir = suite_path / "scenarios"
+
+    if not manifest_path.exists():
+        raise SuiteLoadError(f"Missing suite.yaml at {manifest_path}")
+    if not scenarios_dir.is_dir():
+        raise SuiteLoadError(f"Missing scenarios/ directory at {scenarios_dir}")
+
+    with manifest_path.open() as f:
+        manifest = yaml.safe_load(f)
+
+    required_manifest_keys = {"name", "description", "agent_target"}
+    missing = required_manifest_keys - set(manifest.keys())
+    if missing:
+        raise SuiteLoadError(f"suite.yaml missing keys: {missing}")
+
+    scenarios: list[Scenario] = []
+    seen_ids: set[str] = set()
+
+    for scenario_file in sorted(scenarios_dir.glob("*.yaml")):
+        try:
+            scenario = _load_scenario(scenario_file)
+        except (yaml.YAMLError, ValidationError) as e:
+            raise SuiteLoadError(f"Failed to load {scenario_file.name}: {e}") from e
+
+        if scenario.external_id in seen_ids:
+            raise SuiteLoadError(f"Duplicate scenario id: {scenario.external_id}")
+        seen_ids.add(scenario.external_id)
+        scenarios.append(scenario)
+
+    if not scenarios:
+        raise SuiteLoadError(f"No scenarios found in {scenarios_dir}")
+
+    return Suite(
+        name=manifest["name"],
+        description=manifest["description"],
+        agent_target=manifest["agent_target"],
+        scenarios=scenarios,
+        root_path=suite_path,
+    )
+
+
+def _load_scenario(path: Path) -> Scenario:
+    """Parse one scenario YAML file into a Scenario model."""
+    with path.open() as f:
+        raw = yaml.safe_load(f)
+
+    if not isinstance(raw, dict):
+        raise SuiteLoadError(f"{path.name} must contain a YAML mapping at the root")
+
+    # The YAML uses 'id' but our Pydantic model uses 'external_id'
+    if "id" in raw:
+        raw["external_id"] = raw.pop("id")
+
+    rubric_raw = raw.pop("rubric", {})
+    scenario = Scenario(**raw, rubric=Rubric(**rubric_raw))
+    return scenario

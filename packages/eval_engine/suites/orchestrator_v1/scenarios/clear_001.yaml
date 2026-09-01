@@ -1,0 +1,27 @@
+id: clear_001
+category: clear
+complexity: single_step
+input: "book a meeting with priya at 3pm tomorrow"
+context:
+  prior_turns: []
+  active_apps: ["Calendar"]
+expected:
+  routed_agent: calendar_agent
+  extracted_entities:
+    subject: priya
+    action: create
+    time: "3pm tomorrow"
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+    - extracted_entities.subject_present
+    - extracted_entities.action_present
+  llm_judge_prompt: |
+    Given the user input "{{ input }}" the orchestrator routed to {{ actual.routed_agent }}
+    and extracted {{ actual.extracted_entities }}.
+    Expected routing was {{ expected.routed_agent }}.
+    Score 1-5: is this routing decision correct and are the entities well-extracted?
+  latency_budget_ms: 800
+notes: |
+  Clean happy path. Explicit intent, unambiguous entities, single-agent execution.
