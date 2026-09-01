@@ -1,0 +1,3 @@
+name: orchestrator_v1
+description: Routing and entity-extraction scenarios for the v1 orchestrator agent.
+agent_target: orchestrator
