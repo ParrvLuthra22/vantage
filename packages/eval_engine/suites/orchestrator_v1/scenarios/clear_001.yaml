@@ -4,7 +4,7 @@ complexity: single_step
 input: "book a meeting with priya at 3pm tomorrow"
 context:
   prior_turns: []
-  active_apps: ["Calendar"]
+  active_apps: ["Calendar", "Messages"]
 expected:
   routed_agent: calendar_agent
   extracted_entities:
@@ -15,13 +15,22 @@ expected:
 rubric:
   hard_checks:
     - routed_agent_matches
+    - not_refused
     - extracted_entities.subject_present
     - extracted_entities.action_present
+    - extracted_entities.time_present
   llm_judge_prompt: |
-    Given the user input "{{ input }}" the orchestrator routed to {{ actual.routed_agent }}
-    and extracted {{ actual.extracted_entities }}.
-    Expected routing was {{ expected.routed_agent }}.
-    Score 1-5: is this routing decision correct and are the entities well-extracted?
+    User said: "{{ input }}"
+    Orchestrator routed to: {{ actual.routed_agent }}
+    Extracted: {{ actual.extracted_entities }}
+    Expected agent: {{ expected.routed_agent }}
+
+    Score the routing decision on quality:
+    - Was the correct agent selected?
+    - Were the entities cleanly extracted with correct semantics?
+    - Any signs of over-extraction (hallucinated fields) or under-extraction (missing fields)?
   latency_budget_ms: 800
 notes: |
-  Clean happy path. Explicit intent, unambiguous entities, single-agent execution.
+  Canonical happy path. Explicit intent word ("meeting"), unambiguous subject (person name),
+  explicit time. This should be the easiest possible scenario — if it fails, something is
+  fundamentally broken.

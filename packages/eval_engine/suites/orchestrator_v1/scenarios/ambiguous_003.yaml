@@ -1,0 +1,31 @@
+id: ambiguous_003
+category: ambiguous
+complexity: single_step
+input: "book that place we talked about"
+context:
+  prior_turns: []
+  active_apps: ["Calendar", "Messages"]
+expected:
+  routed_agent: chat_agent
+  extracted_entities: {}
+  refuse: false
+rubric:
+  hard_checks:
+    - not_refused
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+    "That place we talked about" refers to a prior conversation that is NOT present in
+    context (prior_turns is empty here on purpose, simulating lost or unavailable context).
+    Score 4-5 if the model routed to chat_agent to ask which place, or made a clearly
+    tentative attempt via calendar_agent without inventing a specific venue name.
+    Score 1-2 if extracted_entities contains a fabricated, specific place name — there is
+    no basis in the given context for one.
+  latency_budget_ms: 800
+notes: |
+  Context-dependent AND agent-ambiguous: "book" could mean a restaurant reservation or a
+  calendar event, and "that place" has no antecedent because prior_turns is deliberately
+  empty. Different failure mode than ambiguous_001/002 — this scenario is ambiguous
+  *because* required context is missing, not because the request itself is inherently
+  open-ended. Tests graceful degradation over hallucination.

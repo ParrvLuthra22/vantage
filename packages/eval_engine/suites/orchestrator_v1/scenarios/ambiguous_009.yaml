@@ -1,0 +1,30 @@
+id: ambiguous_009
+category: ambiguous
+complexity: single_step
+input: "share this"
+context:
+  prior_turns: []
+  active_apps: ["Files", "Mail", "Messages"]
+expected:
+  routed_agent: chat_agent
+  extracted_entities: {}
+  refuse: false
+rubric:
+  hard_checks:
+    - not_refused
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Available agents: files_agent (share a file), email_agent (share via email),
+    messages_agent (share via message), chat_agent (ask for clarification).
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+    Three unknowns at once: what "this" refers to, which channel to share it through, and
+    who the recipient is. Score 4-5 for chat_agent asking for clarification, or a single
+    reasonable-channel guess with no invented content. Score 1-2 if the model fabricates a
+    specific file name, recipient, or channel not grounded in context.
+  latency_budget_ms: 800
+notes: |
+  The least-constrained scenario in the suite — three simultaneous unknowns (referent,
+  channel, recipient) versus ambiguous_005's two ("send it"). Deliberately placed at the
+  edge of what a router should attempt versus punt on, to see where the judge draws that
+  line.

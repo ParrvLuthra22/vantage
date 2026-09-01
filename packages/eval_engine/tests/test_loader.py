@@ -11,8 +11,10 @@ def test_load_orchestrator_v1_suite():
     assert suite.name == "orchestrator_v1"
     assert len(suite.scenarios) >= 1
     first = suite.scenarios[0]
-    assert first.external_id.startswith("clear_")
     assert first.rubric.hard_checks
+    ids = {s.external_id for s in suite.scenarios}
+    assert any(i.startswith("clear_") for i in ids)
+    assert any(i.startswith("ambiguous_") for i in ids)
 
 
 def test_missing_suite_yaml_raises(tmp_path):

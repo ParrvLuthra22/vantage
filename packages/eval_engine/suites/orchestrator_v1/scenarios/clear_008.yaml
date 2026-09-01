@@ -1,0 +1,33 @@
+id: clear_008
+category: clear
+complexity: single_step
+input: "convert 1kg to pounds"
+context:
+  prior_turns: []
+  active_apps: []
+expected:
+  routed_agent: utility_agent
+  extracted_entities:
+    value: 1
+    from_unit: kg
+    to_unit: pounds
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+    - not_refused
+    - extracted_entities.from_unit_present
+    - extracted_entities.to_unit_present
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Expected agent: {{ expected.routed_agent }}
+
+    Score whether the numeric value and both units were correctly extracted, and whether
+    utility_agent (a lightweight, fast-answering agent) was chosen rather than routing this
+    trivial conversion to chat_agent or search_agent.
+  latency_budget_ms: 800
+notes: |
+  Tests numeric-plus-unit entity extraction on a self-contained, deterministically-answerable
+  query. Purpose: confirm cheap reference lookups don't get routed to heavier agents that
+  would add unnecessary latency or cost.

@@ -1,0 +1,32 @@
+id: clear_006
+category: clear
+complexity: single_step
+input: "open the design brief pdf"
+context:
+  prior_turns: []
+  active_apps: ["Files"]
+expected:
+  routed_agent: files_agent
+  extracted_entities:
+    file_name: "design brief"
+    file_type: pdf
+    action: open
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+    - not_refused
+    - extracted_entities.file_name_present
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Expected agent: {{ expected.routed_agent }}
+
+    Score whether the file name ("design brief") and file type ("pdf") were extracted,
+    and whether files_agent (not chat_agent) was chosen given the explicit "open" verb
+    plus a named artifact.
+  latency_budget_ms: 800
+notes: |
+  Same artifact ("design brief pdf") as clear_005 but a different verb and a different
+  target agent — tests that the orchestrator routes on the action requested (open a local
+  file vs. send an attachment) rather than pattern-matching on the artifact name alone.

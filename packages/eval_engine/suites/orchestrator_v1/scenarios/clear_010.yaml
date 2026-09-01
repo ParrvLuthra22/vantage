@@ -1,0 +1,31 @@
+id: clear_010
+category: clear
+complexity: single_step
+input: "text nisha that I'll be 10 minutes late"
+context:
+  prior_turns: []
+  active_apps: ["Messages"]
+expected:
+  routed_agent: messages_agent
+  extracted_entities:
+    recipient: nisha
+    message: "I'll be 10 minutes late"
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+    - not_refused
+    - extracted_entities.recipient_present
+    - extracted_entities.message_present
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Expected agent: {{ expected.routed_agent }}
+
+    Score whether the recipient ("nisha") and message body were correctly extracted, and
+    whether messages_agent (not email_agent) was chosen given the "text" verb.
+  latency_budget_ms: 800
+notes: |
+  Tests the messages_agent/email_agent boundary via verb choice ("text" vs. "email", see
+  clear_005) and extraction of an unquoted, informal message body rather than a structured
+  slot like a time or file name.

@@ -1,0 +1,30 @@
+id: ambiguous_005
+category: ambiguous
+complexity: single_step
+input: "send it"
+context:
+  prior_turns: []
+  active_apps: ["Mail", "Messages", "Files"]
+expected:
+  routed_agent: chat_agent
+  extracted_entities: {}
+  refuse: false
+rubric:
+  hard_checks:
+    - not_refused
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+    Two unknowns at once: what "it" refers to, and which channel ("send" could mean email,
+    message, or file share). prior_turns is empty, so neither can be resolved from context.
+    Score 4-5 if the model routed to chat_agent to ask for clarification, or made a single
+    reasonable-channel guess without inventing a recipient or attachment.
+    Score 1-2 if it fabricated a specific recipient, file, or message body not present
+    anywhere in the input or context.
+  latency_budget_ms: 800
+notes: |
+  Near-maximal referent ambiguity in this suite — both the object and the channel are
+  unresolved simultaneously. Purpose: confirm that when confidence is very low, the safe
+  behavior is graceful clarification rather than picking an agent and hallucinating
+  required entities to fill in the gaps.

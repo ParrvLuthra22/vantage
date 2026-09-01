@@ -1,0 +1,32 @@
+id: clear_009
+category: clear
+complexity: single_step
+input: "remind me to call mom at 7pm"
+context:
+  prior_turns: []
+  active_apps: ["Reminders"]
+expected:
+  routed_agent: reminders_agent
+  extracted_entities:
+    subject: "call mom"
+    time: "7pm"
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+    - not_refused
+    - extracted_entities.subject_present
+    - extracted_entities.time_present
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Expected agent: {{ expected.routed_agent }}
+
+    Score whether the task ("call mom") and time ("7pm") were extracted, and whether
+    reminders_agent (not calendar_agent) was chosen — the explicit "remind me" phrasing
+    should decide the routing even though a specific time is present.
+  latency_budget_ms: 800
+notes: |
+  Tests the reminders_agent/calendar_agent boundary. Both agents deal with timed content,
+  but "remind me to X at TIME" is a personal-task reminder, not an event with duration or
+  attendees — the verb, not the presence of a time, should drive the routing decision.

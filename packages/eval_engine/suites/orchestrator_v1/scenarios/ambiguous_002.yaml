@@ -1,0 +1,30 @@
+id: ambiguous_002
+category: ambiguous
+complexity: single_step
+input: "when's my next thing"
+context:
+  prior_turns: []
+  active_apps: ["Calendar", "Reminders"]
+expected:
+  routed_agent: calendar_agent
+  extracted_entities: {}
+  refuse: false
+rubric:
+  hard_checks:
+    - not_refused
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Available agents: calendar_agent (events), reminders_agent (alerts).
+    Routed to: {{ actual.routed_agent }}
+
+    "My next thing" has no domain word at all — no "meeting", "reminder", or "event".
+    Score whether the routing is DEFENSIBLE:
+    - 4-5 if calendar_agent or reminders_agent (both are reasonable defaults for "what's next")
+    - 1-2 if any unrelated agent, or if entities were fabricated (there is nothing concrete
+      to extract here — a good response extracts nothing)
+  latency_budget_ms: 800
+notes: |
+  Tests vague temporal-reference resolution with zero domain vocabulary to anchor on. Unlike
+  ambiguous_001 ("the doctor thing" at least names a topic), there's no subject here at all —
+  purpose is to see whether the model defaults sensibly to the most likely interpretation
+  (upcoming calendar item) without inventing entities that aren't present in the input.

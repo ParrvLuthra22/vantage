@@ -1,0 +1,31 @@
+id: ambiguous_006
+category: ambiguous
+complexity: single_step
+input: "what should I do about the priya situation"
+context:
+  prior_turns: []
+  active_apps: ["Messages", "Notes"]
+expected:
+  routed_agent: planning_agent
+  extracted_entities:
+    subject: priya
+  refuse: false
+rubric:
+  hard_checks:
+    - not_refused
+    - extracted_entities.subject_present
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Available agents: planning_agent (open-ended advice), chat_agent (general conversation),
+    messages_agent (send a message to someone).
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+    This is advice-seeking, not a task-execution request — no concrete action was named.
+    Score 4-5 for planning_agent or chat_agent, 1-2 for a task-execution agent like
+    messages_agent (nothing in the input asked to message priya or anyone else).
+  latency_budget_ms: 800
+notes: |
+  Tests distinguishing "give me advice" phrasing from "do a task" phrasing. The subject
+  ("priya") is cleanly extractable even though the concrete action is undefined — purpose
+  is to see whether the orchestrator recognizes open-ended, advice-seeking language rather
+  than defaulting to an executable action just because a person's name is present.

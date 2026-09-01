@@ -1,0 +1,33 @@
+id: ambiguous_010
+category: ambiguous
+complexity: single_step
+input: "help me with the pitch"
+context:
+  prior_turns: []
+  active_apps: ["Notes", "Files"]
+expected:
+  routed_agent: writing_agent
+  extracted_entities:
+    subject: pitch
+  refuse: false
+rubric:
+  hard_checks:
+    - not_refused
+    - extracted_entities.subject_present
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Available agents: writing_agent (draft text), presentation_agent (build slides),
+    research_agent (gather supporting information).
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+    "Help with the pitch" could mean drafting the pitch text, building slides for it, or
+    researching material to support it — all are legitimate readings. Score 4-5 for
+    writing_agent, presentation_agent, or research_agent. Score 1-2 for an unrelated agent
+    (e.g. calendar_agent, messages_agent).
+  latency_budget_ms: 800
+notes: |
+  Tests routing among adjacent "creative work" agents that could all legitimately
+  contribute to one loosely-scoped request. "Pitch" is extractable as the subject even
+  though the concrete task (writing vs. slides vs. research) is genuinely underspecified —
+  this scenario probes agent-boundary ambiguity within a single domain, unlike
+  ambiguous_001 which spans structurally different domains (calendar/notes/reminders).

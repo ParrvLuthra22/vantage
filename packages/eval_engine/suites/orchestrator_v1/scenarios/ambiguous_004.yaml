@@ -1,0 +1,27 @@
+id: ambiguous_004
+category: ambiguous
+complexity: single_step
+input: "the usual for dinner"
+context:
+  prior_turns: []
+  active_apps: ["Messages", "Notes"]
+expected:
+  routed_agent: chat_agent
+  extracted_entities: {}
+  refuse: false
+rubric:
+  hard_checks:
+    - not_refused
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}
+
+    "The usual" requires prior-user history. Without that context, the correct
+    behavior is either to route to chat_agent (which can ask for clarification)
+    or to a notes_agent (looking for a saved "usual" note). Score:
+    - 4-5 if chat_agent or notes_agent
+    - 1-2 if the model hallucinated a specific meal or routed to an inappropriate agent
+  latency_budget_ms: 800
+notes: |
+  Idiom that presupposes long-term memory. Tests refusal of hallucination —
+  we do NOT want the orchestrator picking "pizza" out of thin air.

@@ -1,0 +1,32 @@
+id: clear_002
+category: clear
+complexity: single_step
+input: "what's the weather in delhi tomorrow"
+context:
+  prior_turns: []
+  active_apps: ["Weather"]
+expected:
+  routed_agent: weather_agent
+  extracted_entities:
+    location: delhi
+    time: tomorrow
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+    - not_refused
+    - extracted_entities.location_present
+    - extracted_entities.time_present
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Expected agent: {{ expected.routed_agent }}
+
+    Score whether the location ("delhi") and the relative date ("tomorrow") were both
+    correctly extracted, and whether weather_agent was chosen over a generic search agent
+    despite this being phrased as a question rather than a command.
+  latency_budget_ms: 800
+notes: |
+  Tests place-name plus relative-date extraction in a question-form request (no imperative
+  verb, unlike most of the other clear scenarios). Purpose: confirm the orchestrator doesn't
+  need an explicit command verb to route confidently when domain and slots are unambiguous.

@@ -1,0 +1,30 @@
+id: ambiguous_007
+category: ambiguous
+complexity: single_step
+input: "add another one"
+context:
+  prior_turns: []
+  active_apps: ["Notes"]
+expected:
+  routed_agent: shopping_agent
+  extracted_entities: {}
+  refuse: false
+rubric:
+  hard_checks:
+    - not_refused
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Available agents: shopping_agent (shopping list), notes_agent (freeform notes),
+    list_agent (generic lists).
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+    "Another one" presupposes a specific list was just being discussed, but prior_turns is
+    empty here — there's no way to know which list, or what item, without that context.
+    Score 4-5 for shopping_agent, notes_agent, list_agent, or chat_agent asking for
+    clarification. Score 1-2 for an unrelated agent, or for fabricating a specific item name.
+  latency_budget_ms: 800
+notes: |
+  Closest sibling to clear_004 ("add milk to my shopping list") but with the list type and
+  the item both stripped out, leaving only a bare pronoun ("another one"). Contrast pair:
+  clear_004 shows explicit naming resolves ambiguity; this scenario shows what's left when
+  that naming is removed and no prior turn supplies it.

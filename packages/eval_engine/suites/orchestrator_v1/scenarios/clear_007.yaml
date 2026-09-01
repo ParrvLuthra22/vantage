@@ -1,0 +1,33 @@
+id: clear_007
+category: clear
+complexity: single_step
+input: "find flights to bangalore for friday"
+context:
+  prior_turns: []
+  active_apps: []
+expected:
+  routed_agent: search_agent
+  extracted_entities:
+    destination: bangalore
+    date: friday
+    domain: flights
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+    - not_refused
+    - extracted_entities.destination_present
+    - extracted_entities.date_present
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Expected agent: {{ expected.routed_agent }}
+
+    Score whether the destination ("bangalore") and relative date ("friday") were both
+    extracted, and whether search_agent was chosen over calendar_agent — a date is present
+    but this is a travel search, not a scheduling request.
+  latency_budget_ms: 800
+notes: |
+  Tests multi-entity extraction (destination + relative date) in a search-verb request, and
+  specifically probes the calendar_agent/search_agent boundary: the presence of a date word
+  ("friday") should not be enough on its own to misroute this as scheduling.

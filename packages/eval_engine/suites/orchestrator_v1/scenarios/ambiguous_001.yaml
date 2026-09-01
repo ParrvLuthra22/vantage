@@ -1,0 +1,33 @@
+id: ambiguous_001
+category: ambiguous
+complexity: single_step
+input: "remind me about the doctor thing"
+context:
+  prior_turns: []
+  active_apps: ["Calendar", "Notes", "Reminders"]
+expected:
+  routed_agent: calendar_agent
+  extracted_entities:
+    subject: "doctor"
+    action: retrieve
+  refuse: false
+rubric:
+  hard_checks:
+    - not_refused
+    # Note: no routed_agent_matches — this is genuinely ambiguous, so we
+    # don't hard-fail on exact agent match. LLM judge assesses defensibility.
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Available agents: calendar_agent (events), notes_agent (freeform notes), reminders_agent (alerts).
+    Routed to: {{ actual.routed_agent }}
+
+    "The doctor thing" is deliberately underspecified. Multiple agents could serve this.
+    Score whether the routing is DEFENSIBLE:
+    - 4-5 if calendar_agent or reminders_agent (both plausible)
+    - 3 if notes_agent (weaker but understandable)
+    - 1-2 if any other agent, or if the model asked for clarification when it should have just tried
+  latency_budget_ms: 800
+notes: |
+  Ambiguity: "the doctor thing" could be a calendar event, a note, or a reminder.
+  Purpose: exercise the judge's ability to score defensibility rather than exact-match.
+  There is no single correct answer; we care that the model made a reasonable choice.

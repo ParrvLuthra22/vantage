@@ -1,0 +1,31 @@
+id: clear_005
+category: clear
+complexity: single_step
+input: "email vinay the design brief pdf when you get a chance"
+context:
+  prior_turns: []
+  active_apps: ["Mail", "Files"]
+expected:
+  routed_agent: email_agent
+  extracted_entities:
+    recipient: vinay
+    subject: "design brief"
+    attachment: "pdf"
+    urgency: low
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+    - extracted_entities.recipient_present
+    - extracted_entities.attachment_present
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+    Score whether the routing is correct and whether "when you get a chance" was
+    interpreted as low urgency rather than a specific time.
+  latency_budget_ms: 800
+notes: |
+  Tests entity resolution — recipient, artifact type, urgency signal. Deliberate
+  soft time modifier ("when you get a chance") to test that the model doesn't
+  hallucinate a specific time.

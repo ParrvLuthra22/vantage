@@ -1,0 +1,33 @@
+id: clear_004
+category: clear
+complexity: single_step
+input: "add milk to my shopping list"
+context:
+  prior_turns: []
+  active_apps: ["Notes"]
+expected:
+  routed_agent: shopping_agent
+  extracted_entities:
+    item: milk
+    action: add
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+    - not_refused
+    - extracted_entities.item_present
+    - extracted_entities.action_present
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Expected agent: {{ expected.routed_agent }}
+
+    Score whether the item ("milk") and action ("add") were correctly extracted, and whether
+    shopping_agent (not a generic notes_agent) was chosen given the explicit phrase
+    "shopping list".
+  latency_budget_ms: 800
+notes: |
+  Contrast case for ambiguous_007 ("add another one"). Here the list type is named
+  explicitly ("shopping list"), so routing should be unambiguous even though both scenarios
+  share the same underlying "add an item to a list" structure. Tests that explicit naming
+  resolves what pronoun-only phrasing cannot.
