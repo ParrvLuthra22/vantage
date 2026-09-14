@@ -85,3 +85,7 @@ Thumbs.db
 # Logs / local databases
 *.log
 *.sqlite3
+
+# Vesper's own local trace/audit output, written relative to CWD when
+# running evals against --adapter vesper
+packages/eval_engine/data/
