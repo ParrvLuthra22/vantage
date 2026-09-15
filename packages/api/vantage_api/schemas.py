@@ -83,3 +83,56 @@ class TraceDetail(TraceOut):
     """Trace summary plus its full span list — the single-trace endpoint."""
 
     spans: list[SpanOut]
+
+
+class EvalScenarioSummary(BaseModel):
+    """Just enough about a scenario to label a result row — not the full
+    EvalScenario (input/context/expected/rubric), which the run-detail view
+    doesn't need per-result."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    external_id: str
+    category: str
+    known_failing: bool
+    known_failing_reason: Optional[str] = None
+
+
+class EvalResultOut(BaseModel):
+    """One scenario's outcome within a run, with its scenario's identity and
+    known_failing status joined in — so a client can separate known-failing
+    rows from real failures without a second round trip."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    result_id: UUID
+    scenario: EvalScenarioSummary
+    trace_id: Optional[UUID]
+    deterministic_scores: dict[str, Any]
+    llm_judge_score: Optional[float]
+    llm_judge_reasoning: Optional[str]
+    latency_ms: Optional[int]
+    latency_within_budget: Optional[bool]
+    passed: bool
+
+
+class EvalRunOut(BaseModel):
+    """Run summary — the shape returned by the list endpoint."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    run_id: UUID
+    suite_id: UUID
+    agent_version: str
+    judge_model: str
+    started_at: datetime
+    finished_at: Optional[datetime]
+    status: str
+    is_baseline: bool
+    summary: dict[str, Any]
+
+
+class EvalRunDetail(EvalRunOut):
+    """Run summary plus every scenario result — the single-run endpoint."""
+
+    results: list[EvalResultOut]

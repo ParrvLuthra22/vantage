@@ -1,0 +1,37 @@
+id: context_dependent_005
+category: context_dependent
+complexity: multi_step
+input: "Now do it again, but this time also show me a notification when it's done."
+context:
+  prior_turns:
+    - user: "Take a screenshot."
+      response: "Screenshot captured, Sir."
+  active_apps: []
+expected:
+  routed_agent: take_screenshot
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+  llm_judge_prompt: |
+    Prior turn — user: "Take a screenshot." / Vesper: "Screenshot captured,
+    Sir."
+    Current user message: "{{ input }}"
+    Routed to (first tool call): {{ actual.routed_agent }}
+    Full turn output (includes every tool called, not just the first): {{ actual.raw_output }}
+
+    "Do it again" refers to taking another screenshot (from the prior turn),
+    plus a new second step: a notification once done. This needs two tool
+    calls chained in one turn: take_screenshot then show_notification. Score:
+      5 = both take_screenshot and show_notification are called, in that order
+      3 = only take_screenshot is called (misses the added notification step)
+      1 = doesn't recognize "it" refers to taking a screenshot at all
+  latency_budget_ms: 8000
+notes: |
+  Combines context resolution ("it" = screenshot, from prior turn) with a
+  multi-step request (two tool calls in one turn). VesperAdapter's
+  routed_agent reports only the FIRST tool called (see _invoke_async in
+  vantage_eval/agents/vesper.py), so this scenario's hard check alone can't see
+  the second step — the judge prompt uses `actual.raw_output` instead, which
+  llm_judge.py now passes through to every judge template (added while writing
+  this scenario, since it wasn't exposed before).

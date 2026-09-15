@@ -190,6 +190,14 @@ class EvalScenario(Base):
         DateTime(timezone=True), default=_utcnow
     )
 
+    # True for a scenario with a confirmed, filed bug in the agent under test
+    # (Bucket A in the triage process — see docs/baselines/). Kept running and
+    # scored normally; excluded only from the suite's pass-rate denominator so
+    # a documented, tracked gap doesn't gate merges while it's still visible in
+    # reports. `known_failing_reason` carries the tracking issue URL.
+    known_failing: Mapped[bool] = mapped_column(Boolean, default=False)
+    known_failing_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     suite: Mapped["EvalSuite"] = relationship(back_populates="scenarios")
     results: Mapped[list["EvalResult"]] = relationship(
         back_populates="scenario",
@@ -227,6 +235,11 @@ class EvalRun(Base):
     status: Mapped[str] = mapped_column(String(16))
     summary: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
+    # At most one True per suite_id — enforced by the app (persistence layer
+    # unsets the previous baseline in the same transaction it sets a new one)
+    # AND by the partial unique index below, belt-and-suspenders.
+    is_baseline: Mapped[bool] = mapped_column(Boolean, default=False)
+
     suite: Mapped["EvalSuite"] = relationship(back_populates="runs")
     results: Mapped[list["EvalResult"]] = relationship(
         back_populates="run",
@@ -240,6 +253,15 @@ class EvalRun(Base):
             "ix_eval_runs_suite_started_desc",
             "suite_id",
             text("started_at DESC"),
+        ),
+        # Partial unique index: a row can only conflict with another row where
+        # is_baseline is also true, so at most one baseline can ever exist per
+        # suite at the database level, independent of application logic.
+        Index(
+            "uq_eval_runs_one_baseline_per_suite",
+            "suite_id",
+            unique=True,
+            postgresql_where=text("is_baseline"),
         ),
     )
 

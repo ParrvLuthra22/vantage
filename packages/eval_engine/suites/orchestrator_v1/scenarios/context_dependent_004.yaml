@@ -1,0 +1,34 @@
+id: context_dependent_004
+category: context_dependent
+complexity: single_step
+input: "Actually turn it up a bit more."
+context:
+  prior_turns:
+    - user: "Set volume to 50."
+      response: "Volume set to 50%, Sir."
+  active_apps: []
+expected:
+  routed_agent: set_volume
+  refuse: false
+rubric:
+  hard_checks: []
+  llm_judge_prompt: |
+    Prior turn — user: "Set volume to 50." / Vesper: "Volume set to 50%, Sir."
+    Current user message: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+    Vesper's set_volume tool takes an exact level, not a relative delta — there
+    is no "increase_volume" tool. "A bit more" is a relative instruction the
+    model must translate into a new absolute number using the prior turn's 50
+    as the baseline. Both a sensible inferred bump (e.g. 65) and an honest
+    clarifying question ("by how much, Sir?") are defensible; silently reusing
+    50 (no change) or picking an extreme value (e.g. 100) is not. Score:
+      5 = infers a reasonable higher level (e.g. 60-75) via set_volume, or asks
+          a clarifying question rather than guessing wildly
+      3 = calls set_volume but with an implausible jump (e.g. straight to 100)
+      1 = doesn't use the prior turn's level at all, or takes no action
+  latency_budget_ms: 6000
+notes: |
+  No routed_agent_matches: both set_volume-with-a-guess and a clarifying
+  chat_agent question are legitimate given Vesper has no relative-adjustment
+  primitive. Judge assesses whether the inferred delta (if any) is sane.

@@ -1,3 +1,3 @@
 name: orchestrator_v1
 description: "Golden scenarios for Vesper's orchestrator routing decisions"
-agent_target: vesper.orchestrator
+agent_target: orchestrator.planner

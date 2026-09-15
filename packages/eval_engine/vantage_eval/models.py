@@ -48,6 +48,20 @@ class Scenario(BaseModel):
     rubric: Rubric
     notes: Optional[str] = None
 
+    known_failing: bool = False
+    """True for a scenario with a confirmed, filed Vesper bug (Bucket A).
+
+    A known-failing scenario keeps running and scoring normally, but is
+    excluded from the suite's pass-rate denominator (see SuiteRunSummary) so a
+    documented, tracked gap doesn't gate merges — while still surfacing in
+    reports so a regression or a fix is visible.
+    """
+
+    known_failing_reason: Optional[str] = None
+    """Required in practice when known_failing is True: a short description
+    plus the tracking issue URL, e.g. "routes to notes_agent instead of
+    asking for clarification — https://github.com/.../issues/42"."""
+
 
 class AgentOutput(BaseModel):
     """What an AgentAdapter returns after invocation."""
@@ -79,6 +93,12 @@ class ScenarioResult(BaseModel):
     latency_within_budget: Optional[bool] = None
     passed: bool = False
 
+    known_failing: bool = False
+    """Copied from Scenario.known_failing by the runner. Scored honestly by
+    aggregate_pass like any other scenario — this only changes how the
+    *suite* summary and reports bucket the result, not whether it "really"
+    passed."""
+
     def aggregate_pass(self, min_llm_score: float = 4.0) -> bool:
         """Compute overall pass/fail from component scores."""
         if any(not r.passed for r in self.deterministic_results):
@@ -91,10 +111,17 @@ class ScenarioResult(BaseModel):
 
 
 class SuiteRunSummary(BaseModel):
+    """`total`/`passed`/`failed`/`pass_rate` are the EFFECTIVE figures — i.e.
+    computed only over non-known-failing scenarios, so a documented Vesper
+    bug doesn't drag down the number a baseline gates on. `total_scenarios`
+    is every scenario in the suite, known-failing included."""
+
     total: int
     passed: int
     failed: int
     pass_rate: float
+    total_scenarios: int
+    known_failing: int = 0
     avg_llm_score: Optional[float] = None
     total_judge_cost_usd: float = 0.0
     duration_seconds: float = 0.0

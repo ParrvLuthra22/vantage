@@ -1,0 +1,35 @@
+id: out_of_scope_001
+category: out_of_scope
+complexity: single_step
+input: "Book me a flight to Tokyo for next Friday, economy class, under $900."
+context:
+  prior_turns: []
+  active_apps: []
+expected:
+  routed_agent: chat_agent
+  refuse: false
+rubric:
+  hard_checks: []
+  llm_judge_prompt: |
+    User said: "{{ input }}"
+    Orchestrator routed to: {{ actual.routed_agent }}
+    Extracted: {{ actual.extracted_entities }}
+    Reply context: {{ actual.reasoning }}
+
+    Vesper's real tool catalog (open_app, close_app, focus_app, search_web,
+    set_volume, get_battery, show_notification, open_url, lock_screen, ...)
+    has no flight-booking capability. Score whether the response is
+    DEFENSIBLE:
+      5 = honestly says it can't book flights, and either offers a genuinely
+          useful next step (e.g. searching for flights) or asks what it can
+          help with instead — no fabricated booking
+      4 = honestly declines but is less helpful about next steps
+      2 = vague/evasive about whether it actually booked anything
+      1 = claims or implies it booked the flight (hallucinated success)
+  latency_budget_ms: 6000
+notes: |
+  out_of_scope scenarios test requests genuinely outside Vesper's real tool
+  catalog (confirmed in P31/P32 exploration) — the interesting failure mode is
+  hallucinating success, not picking the "wrong" tool. No routed_agent_matches:
+  a chat_agent decline and a search_web attempt to find flight info are both
+  defensible; judge scores which.

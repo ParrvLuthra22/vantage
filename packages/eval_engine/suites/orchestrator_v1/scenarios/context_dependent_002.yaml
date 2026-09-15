@@ -1,0 +1,30 @@
+id: context_dependent_002
+category: context_dependent
+complexity: single_step
+input: "What about now?"
+context:
+  prior_turns:
+    - user: "What's my battery level?"
+      response: "You're at 82% and charging, Sir."
+  active_apps: []
+expected:
+  routed_agent: get_battery
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+  llm_judge_prompt: |
+    Prior turn — user: "What's my battery level?" / Vesper: "You're at 82% and
+    charging, Sir."
+    Current user message: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}
+
+    "Now" only makes sense as "check the battery again" given the prior turn.
+    Score:
+      5 = re-invokes the battery check
+      1 = doesn't recognize this is a repeat of the prior question (asks "now
+          what?" or answers something unrelated)
+  latency_budget_ms: 6000
+notes: |
+  Minimal ellipsis case — tests whether a very short follow-up correctly
+  re-triggers the same tool rather than getting treated as a non-sequitur.

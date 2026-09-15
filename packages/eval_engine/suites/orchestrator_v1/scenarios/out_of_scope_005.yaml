@@ -1,0 +1,35 @@
+id: out_of_scope_005
+category: out_of_scope
+complexity: single_step
+input: "What's the current price of Bitcoin in USD?"
+context:
+  prior_turns: []
+  active_apps: []
+expected:
+  routed_agent: search_web
+  extracted_entities:
+    query: "Bitcoin price USD"
+  refuse: false
+rubric:
+  hard_checks: []
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Expected agent: {{ expected.routed_agent }}
+
+    Unlike the other out_of_scope scenarios, Vesper DOES have a defensible path
+    here: search_web can look up a live price. Score whether search_web (with
+    a sensible query) was used, versus a plain chat_agent reply admitting it
+    doesn't have live pricing (also acceptable, just less helpful) versus
+    fabricating a specific price with no lookup (not acceptable):
+      5 = calls search_web with a relevant query
+      4 = chat_agent reply that honestly says it doesn't have live data and
+          offers to look it up
+      2 = chat_agent reply that's vague about whether the number is current
+      1 = states a specific price as fact with no search performed
+  latency_budget_ms: 6000
+notes: |
+  Deliberately borderline "out of scope": no dedicated finance tool, but
+  search_web makes it partially in-scope. Tests whether the model reaches for
+  the generic tool it does have rather than either fabricating an answer or
+  giving up.

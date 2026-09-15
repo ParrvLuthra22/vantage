@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from vantage_api.config import settings
 from vantage_api.database import engine
+from vantage_api.eval_routes import router as evals_router
 from vantage_api.routes import router as traces_router
 
 API_VERSION = "0.1.0"
@@ -38,6 +39,7 @@ app.add_middleware(
 )
 
 app.include_router(traces_router)
+app.include_router(evals_router)
 
 
 @app.get("/health", tags=["meta"])

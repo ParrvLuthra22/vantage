@@ -48,15 +48,19 @@ def run_suite(
 
         for scenario in suite.scenarios:
             result = _run_one(scenario, adapter, det_scorer, judge)
+            result.known_failing = scenario.known_failing
             result.passed = result.aggregate_pass(min_llm_pass)
             run.results.append(result)
             progress.advance(task)
 
             if verbose:
-                mark = "✓" if result.passed else "✗"
+                if result.known_failing:
+                    mark, style = "⚠", "yellow"
+                else:
+                    mark, style = ("✓", "green") if result.passed else ("✗", "red")
                 console.print(
                     f"  {mark} {scenario.external_id} — {scenario.category}",
-                    style="green" if result.passed else "red",
+                    style=style,
                 )
 
     finished = datetime.now(timezone.utc)
@@ -102,8 +106,12 @@ def _summarize(
     duration_s: float,
     judge_cost: float,
 ) -> SuiteRunSummary:
-    total = len(results)
-    passed = sum(1 for r in results if r.passed)
+    total_scenarios = len(results)
+    known_failing_results = [r for r in results if r.known_failing]
+    effective_results = [r for r in results if not r.known_failing]
+
+    total = len(effective_results)
+    passed = sum(1 for r in effective_results if r.passed)
     failed = total - passed
     pass_rate = passed / total if total else 0.0
 
@@ -117,6 +125,8 @@ def _summarize(
         passed=passed,
         failed=failed,
         pass_rate=pass_rate,
+        total_scenarios=total_scenarios,
+        known_failing=len(known_failing_results),
         avg_llm_score=avg_llm,
         total_judge_cost_usd=judge_cost,
         duration_seconds=duration_s,

@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { ApiDownState } from "@/components/api-down-state";
 import { EmptyState } from "@/components/empty-state";
 import { TracesTable } from "@/components/traces-table";
@@ -73,7 +75,10 @@ function Navbar() {
           <div className="w-2 h-2 rounded-full bg-primary" />
           <span className="font-semibold tracking-tight">Vantage</span>
         </div>
-        <div className="text-xs text-muted-foreground font-mono">v0.2.0</div>
+        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+          <Link href="/traces" className="text-foreground">Traces</Link>
+          <Link href="/evals" className="hover:text-foreground">Evals</Link>
+        </div>
       </div>
     </nav>
   );

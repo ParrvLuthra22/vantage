@@ -1,4 +1,4 @@
-import { Trace, TraceDetail } from "./types";
+import { EvalRun, EvalRunDetail, Trace, TraceDetail } from "./types";
 
 /**
  * Server-side API client for the Vantage backend.
@@ -60,4 +60,14 @@ export async function listTraces(project = "vesper", limit = 50): Promise<Trace[
 
 export async function getTrace(traceId: string): Promise<TraceDetail> {
   return fetchApi<TraceDetail>(`/traces/${encodeURIComponent(traceId)}`);
+}
+
+export async function listEvalRuns(suite = "orchestrator_v1", limit = 50): Promise<EvalRun[]> {
+  return fetchApi<EvalRun[]>(
+    `/evals/runs?suite=${encodeURIComponent(suite)}&limit=${limit}`,
+  );
+}
+
+export async function getEvalRun(runId: string): Promise<EvalRunDetail> {
+  return fetchApi<EvalRunDetail>(`/evals/runs/${encodeURIComponent(runId)}`);
 }
