@@ -24,6 +24,34 @@ def test_adapter_defers_vesper_import_until_invoke():
 
 
 @pytest.mark.integration
+def test_direct_handler_tools_are_neutralized():
+    """Guards against a real regression: an early P32 run's ambiguous_007
+    scenario actually created a note in the real macOS Notes app via
+    run_applescript, because tools.creator's direct-handler tools
+    (run_shell/run_applescript/research/write_script — registered
+    transitively by importing orchestrator.planner, see tools/__init__.py)
+    are NOT bus-routed and so were never covered by the ActionRequestEvent
+    mock. Every ToolSpec with a direct handler must be neutralized."""
+    pytest.importorskip("orchestrator.planner")
+    from tools.registry import get_registry
+
+    adapter = VesperAdapter()
+    adapter._ensure_ready()
+
+    registry = get_registry()
+    direct_handler_tools = [t for t in registry.list_all(enabled_only=False) if t.handler is not None]
+    assert direct_handler_tools, "expected at least one direct-handler tool to check against"
+
+    for tool_spec in direct_handler_tools:
+        import asyncio
+
+        result = asyncio.run(tool_spec.handler({"probe": "test"}, {}))
+        assert "eval-mock" in str(result), (
+            f"{tool_spec.name}'s handler was not neutralized — it would execute for real"
+        )
+
+
+@pytest.mark.integration
 def test_adapter_invokes_vesper():
     """Requires vesper to be installed. Runs one real invocation with every
     side-effecting tool call neutralized (Guardian auto-allows; ActionRequestEvent

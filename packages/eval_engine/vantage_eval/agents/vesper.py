@@ -22,7 +22,7 @@ expected to score poorly until P32 either registers matching tools or the
 scenario expectations are revised.
 
 Design principles:
-  1. NO side effects. Two mechanisms make every tool call inert, for the
+  1. NO side effects. Three mechanisms make every tool call inert, for the
      life of this adapter:
        - `Guardian.check` is replaced with a function that always returns
          ALLOW, so "confirm"/"dangerous"-tier tools (close_app, lock_screen,
@@ -33,9 +33,20 @@ Design principles:
          SystemAgent/WebSearchAgent subscribed to run them, an `ActionRequestEvent`
          would otherwise time out after 30s with no result. Instead we
          subscribe a mock responder that immediately answers every
-         `ActionRequestEvent` with a canned successful `ActionResultEvent` —
-         so nothing ever touches AppleScript, a browser, or any other real
-         side effect.
+         `ActionRequestEvent` with a canned successful `ActionResultEvent`.
+       - Every DIRECT-HANDLER tool in the registry (ToolSpec.handler is not
+         None) has that handler replaced with a no-op. This is NOT limited to
+         tools.builtin: importing `tools` (which `orchestrator.planner` does
+         transitively) also imports tools.devtools/tools.creator/tools.weather
+         for their own registration side effects (see tools/__init__.py), and
+         tools.creator registers run_shell/run_applescript with REAL direct
+         handlers — dangerous-tier, but still executed with no confirmation
+         once Guardian is bypassed above. This was discovered the hard way:
+         an early P32 run's `ambiguous_007` ("add another one") actually
+         created a blank note in the real Notes app via run_applescript
+         before this patch existed. The bus-routed mock above does not cover
+         this class of tool at all, since a direct-handler tool never emits
+         an ActionRequestEvent — hence this separate, registry-wide patch.
   2. Capture the routing decision by listening for the Planner's own
      `ToolCallStartedEvent` (tool_name + arguments) during the call, rather
      than inspecting a state dict that doesn't exist in this architecture.
@@ -101,10 +112,24 @@ class VesperAdapter(AgentAdapter):
         from config.settings import load_config_dict
         from guardian.gate import Guardian, Verdict, VerdictType
         from llm.router import ModelRouter
-        from orchestrator.planner import Planner
+        from orchestrator.planner import Planner  # noqa: F401 side effect: imports tools.*, see below
         from schemas.events import ActionRequestEvent, ActionResultEvent, ToolCallStartedEvent
         from tasks.queue import TaskQueue
+        from tools.registry import get_registry
         from tracing.tracer import Tracer
+
+        # Neutralize every direct-handler tool in the registry BEFORE
+        # constructing the Planner. Importing orchestrator.planner above
+        # already imported tools.builtin, which (via tools/__init__.py)
+        # transitively registered tools.devtools/tools.creator/tools.weather
+        # too — including tools.creator's run_shell/run_applescript, both
+        # DANGEROUS-tier tools with real handlers. Bus-routed tools
+        # (target_agent/action, handler=None) are unaffected here; those are
+        # covered by the ActionRequestEvent mock below instead.
+        registry = get_registry()
+        for tool_spec in registry.list_all(enabled_only=False):
+            if tool_spec.handler is not None:
+                tool_spec.handler = self._make_mock_handler(tool_spec.name)
 
         event_bus = get_event_bus()
         guardian = Guardian(event_bus=event_bus)
@@ -211,6 +236,22 @@ class VesperAdapter(AgentAdapter):
                 {"reply": result.text, "aborted": result.aborted, "tool_calls": tool_calls}
             )[:2000],
         )
+
+    @staticmethod
+    def _make_mock_handler(tool_name: str):
+        """A no-op replacement for one ToolSpec's direct handler.
+
+        Returns a plausible-looking mocked string (matching the
+        `_mock_action_handler` bus-routed mock's spirit) rather than raising
+        or returning None, so the model's next planning iteration sees a
+        normal tool result and can keep reasoning coherently instead of
+        hitting an unexplained error.
+        """
+
+        async def _mock(arguments: dict, context: dict) -> str:
+            return f"[eval-mock] {tool_name} was not actually executed (arguments={arguments!r})"
+
+        return _mock
 
     @staticmethod
     def _first_active_app(context: dict[str, Any]) -> str | None:
