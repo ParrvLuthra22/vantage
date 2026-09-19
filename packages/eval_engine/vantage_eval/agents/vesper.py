@@ -50,12 +50,26 @@ Design principles:
   2. Capture the routing decision by listening for the Planner's own
      `ToolCallStartedEvent` (tool_name + arguments) during the call, rather
      than inspecting a state dict that doesn't exist in this architecture.
-  3. Include a Vantage trace_id in the output so we can jump from eval
+  3. Distinguish PLANNER_FAILURE from ADAPTER_ERROR. Vesper's
+     `llm.router.ModelRouter.complete()` never raises when both the primary
+     (Groq) and fallback (local Ollama) tiers fail — it returns a
+     `RouterError` (llm/types.py), which `Planner.run()` folds into
+     `PlannerResult(aborted=True, text=<user-facing message>)` with zero
+     tool calls made yet (a legitimate MAX_ITERATIONS abort always has at
+     least one tool call, since every iteration up to that point needed a
+     successful completion to keep the loop going). That "aborted with no
+     tool calls" shape is therefore Vesper's own LLM failing, not a bug in
+     this file — see `_is_planner_failure`. It gets one retry with a short
+     backoff, since the Groq failures observed in practice are usually
+     transient and Ollama isn't running in this eval environment to rescue
+     the first attempt.
+  4. Include a Vantage trace_id in the output so we can jump from eval
      result to full trace in the dashboard.
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any
 from uuid import UUID
@@ -65,6 +79,8 @@ from vantage import span
 
 from vantage_eval.agents.base import AgentAdapter
 from vantage_eval.models import AgentOutput
+
+log = logging.getLogger(__name__)
 
 
 class VesperAdapter(AgentAdapter):
@@ -78,6 +94,21 @@ class VesperAdapter(AgentAdapter):
     (via `_ensure_ready`) so constructing this adapter never requires
     `vesper` to be installed — only running an eval against it does.
     """
+
+    #: Vesper's own ModelRouter exhausted both its primary (Groq) and
+    #: fallback (local Ollama) tiers for this turn — Vesper's problem or
+    #: infra flakiness, not a bug in this adapter's code.
+    PLANNER_FAILURE = "PLANNER_FAILURE"
+    #: This adapter's own code broke (import error, event-bus wiring, a bug
+    #: in this file) — distinct from Vesper's LLM failing.
+    ADAPTER_ERROR = "ADAPTER_ERROR"
+
+    #: One retry on a transient failure. Most Groq "Connection error"
+    #: failures observed in practice resolve on the second attempt, and
+    #: Ollama (the router's only fallback) isn't running in this eval
+    #: environment to rescue the first one.
+    MAX_RETRIES = 1
+    RETRY_BACKOFF_S = 2.0
 
     def __init__(
         self,
@@ -179,19 +210,89 @@ class VesperAdapter(AgentAdapter):
         self._ToolCallStartedEvent = ToolCallStartedEvent
 
     def invoke(self, input: str, context: dict[str, Any]) -> AgentOutput:
-        start = time.monotonic()
         try:
-            self._ensure_ready()
-            return asyncio.run(self._invoke_async(input, context, start))
+            return asyncio.run(self._invoke_async(input, context))
         except Exception as e:
-            latency_ms = int((time.monotonic() - start) * 1000)
+            # Last-resort net: _invoke_async's own retry loop below already
+            # converts the expected failure surface (a Planner exception, or
+            # a RouterError-shaped abort) into ADAPTER_ERROR/PLANNER_FAILURE
+            # outputs. This only fires if something outside that loop's own
+            # try breaks — invoke() must never raise and crash the suite
+            # runner, matching runner._run_one's philosophy for adapters.
+            log.error(f"Unhandled exception escaped the retry loop: {type(e).__name__}: {e}")
             return AgentOutput(
-                routed_agent="ADAPTER_ERROR",
-                latency_ms=latency_ms,
+                routed_agent=self.ADAPTER_ERROR,
+                latency_ms=0,
                 reasoning=f"{type(e).__name__}: {e}",
             )
 
-    async def _invoke_async(self, input: str, context: dict[str, Any], start: float) -> AgentOutput:
+    async def _invoke_async(self, input: str, context: dict[str, Any]) -> AgentOutput:
+        for attempt in range(self.MAX_RETRIES + 1):
+            start = time.monotonic()
+            try:
+                self._ensure_ready()
+                result, tool_calls = await self._run_planner_once(input, context)
+            except Exception as e:
+                latency_ms = int((time.monotonic() - start) * 1000)
+                log.warning(f"ADAPTER_ERROR on attempt {attempt}: {type(e).__name__}: {e}")
+                if attempt < self.MAX_RETRIES:
+                    await asyncio.sleep(self.RETRY_BACKOFF_S)
+                    continue
+                return AgentOutput(
+                    routed_agent=self.ADAPTER_ERROR,
+                    latency_ms=latency_ms,
+                    reasoning=f"{type(e).__name__}: {e}",
+                    trace_id=self._current_trace_id(),
+                )
+
+            latency_ms = int((time.monotonic() - start) * 1000)
+            trace_id = self._current_trace_id()
+
+            if self._is_planner_failure(result, tool_calls):
+                log.info(f"PLANNER_FAILURE on attempt {attempt} (input={input[:60]!r})")
+                if attempt < self.MAX_RETRIES:
+                    await asyncio.sleep(self.RETRY_BACKOFF_S)
+                    continue
+                return AgentOutput(
+                    routed_agent=self.PLANNER_FAILURE,
+                    latency_ms=latency_ms,
+                    reasoning=(
+                        "Vesper's model router exhausted its primary and fallback "
+                        "LLM tiers for this turn"
+                    ),
+                    trace_id=trace_id,
+                    raw_output=str({"reply": result.text, "aborted": result.aborted})[:2000],
+                )
+
+            if tool_calls:
+                routed_agent = tool_calls[0]["name"]
+                extracted_entities = tool_calls[0]["arguments"]
+            else:
+                routed_agent = "chat_agent"
+                extracted_entities = {}
+
+            return AgentOutput(
+                routed_agent=routed_agent,
+                extracted_entities=extracted_entities,
+                reasoning=result.text if result.aborted else None,
+                latency_ms=latency_ms,
+                trace_id=trace_id,
+                raw_output=str(
+                    {"reply": result.text, "aborted": result.aborted, "tool_calls": tool_calls}
+                )[:2000],
+            )
+
+        # Unreachable: every branch above returns by the final attempt
+        # (attempt == MAX_RETRIES never takes a `continue` path). Present
+        # only to make the function's control flow explicit to type checkers.
+        raise AssertionError("retry loop exited without returning")
+
+    async def _run_planner_once(
+        self, input: str, context: dict[str, Any]
+    ) -> tuple[Any, list[dict[str, Any]]]:
+        """Run the Planner exactly once, returning its `PlannerResult`
+        alongside every tool call observed via `ToolCallStartedEvent` during
+        that single call."""
         tool_calls: list[dict[str, Any]] = []
 
         async def _collect(event: Any) -> None:
@@ -207,35 +308,29 @@ class VesperAdapter(AgentAdapter):
                 )
         finally:
             token.unsubscribe()
+        return result, tool_calls
 
-        latency_ms = int((time.monotonic() - start) * 1000)
-        trace_id = self._current_trace_id()
+    @staticmethod
+    def _is_planner_failure(result: Any, tool_calls: list[dict[str, Any]]) -> bool:
+        """True iff this `PlannerResult` reflects Vesper's ModelRouter
+        exhausting both tiers (a `RouterError`), not a legitimate
+        MAX_ITERATIONS abort.
 
-        if tool_calls:
-            routed_agent = tool_calls[0]["name"]
-            extracted_entities = tool_calls[0]["arguments"]
-        elif result.aborted:
-            # aborted with zero tool calls only happens when the very first
-            # ModelRouter.complete() call itself failed (RouterError) — e.g.
-            # a missing GROQ_API_KEY — never from a legitimate "gave up after
-            # MAX_ITERATIONS" abort, which always has at least one tool call
-            # in its trace.
-            routed_agent = "ADAPTER_ERROR"
-            extracted_entities = {}
-        else:
-            routed_agent = "chat_agent"
-            extracted_entities = {}
-
-        return AgentOutput(
-            routed_agent=routed_agent,
-            extracted_entities=extracted_entities,
-            reasoning=result.text if result.aborted else None,
-            latency_ms=latency_ms,
-            trace_id=trace_id,
-            raw_output=str(
-                {"reply": result.text, "aborted": result.aborted, "tool_calls": tool_calls}
-            )[:2000],
-        )
+        Vesper's `orchestrator.planner.Planner.run()` never raises or
+        exposes a distinct exception for router exhaustion: internally,
+        `ModelRouter.complete()` *returns* (never raises) a `RouterError`
+        when both the primary (Groq) and fallback (Ollama) tiers fail
+        (llm/router.py, llm/types.py), and `Planner.run()` folds that
+        straight into `PlannerResult(aborted=True, text=response.user_message)`
+        with no tool calls made yet. A MAX_ITERATIONS abort, by contrast, is
+        only reachable after every iteration up to the limit produced tool
+        calls from a *successful* completion — so it always has at least one
+        tool call in its trace. "Aborted with zero tool calls" is therefore
+        the only externally-visible signal that distinguishes a router
+        failure from a normal (if unresolved) run, since `RouterError` itself
+        never escapes `Planner.run()`.
+        """
+        return bool(result.aborted) and not tool_calls
 
     @staticmethod
     def _make_mock_handler(tool_name: str):
