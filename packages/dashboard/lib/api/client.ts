@@ -1,4 +1,4 @@
-import { EvalRun, EvalRunDetail, Trace, TraceDetail } from "./types";
+import { EvalRun, EvalRunDetail, RegressionReport, Trace, TraceDetail } from "./types";
 
 /**
  * Server-side API client for the Vantage backend.
@@ -46,6 +46,9 @@ async function fetchApi<T>(path: string, options: RequestInit = {}): Promise<T> 
     const text = await res.text();
     throw new Error(`Vantage API ${res.status}: ${text}`);
   }
+  // 204 No Content (e.g. set-baseline) has no body -- res.json() would throw
+  // on the empty string rather than returning anything meaningful.
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -70,4 +73,22 @@ export async function listEvalRuns(suite = "orchestrator_v1", limit = 50): Promi
 
 export async function getEvalRun(runId: string): Promise<EvalRunDetail> {
   return fetchApi<EvalRunDetail>(`/evals/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function compareRuns(
+  currentId: string,
+  baselineId: string,
+): Promise<RegressionReport> {
+  return fetchApi<RegressionReport>(
+    `/evals/runs/${encodeURIComponent(currentId)}/vs/${encodeURIComponent(baselineId)}`,
+  );
+}
+
+export async function setBaseline(runId: string): Promise<void> {
+  // POST isn't a cacheable method under Next's fetch cache, so fetchApi's
+  // shared `next: { revalidate: 5 }` option (meant for GET) is simply
+  // ignored here rather than doing anything wrong.
+  await fetchApi<void>(`/evals/runs/${encodeURIComponent(runId)}/set-baseline`, {
+    method: "POST",
+  });
 }

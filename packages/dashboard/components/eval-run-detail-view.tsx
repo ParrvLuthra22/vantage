@@ -2,11 +2,14 @@ import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { SetBaselineButton } from "@/components/set-baseline-button";
 import { EvalResult, EvalRunDetail } from "@/lib/api/types";
 import { formatCost, formatDuration, relativeTime, truncateId } from "@/lib/utils/format";
 
-/** Server component — no interaction here, unlike TraceDetailView, so this
- * stays a plain server-rendered page (no "use client" needed). */
+/** Server component — unlike TraceDetailView, nothing here needs client state,
+ * so this stays a plain server-rendered page (no "use client" needed). The one
+ * interactive control, SetBaselineButton, is its own small client component
+ * rather than turning this whole view into one. */
 export function EvalRunDetailView({ run }: { run: EvalRunDetail }) {
   const knownFailing = run.results.filter((r) => r.scenario.known_failing);
   const realFailures = run.results.filter((r) => !r.scenario.known_failing && !r.passed);
@@ -44,6 +47,7 @@ export function EvalRunDetailView({ run }: { run: EvalRunDetail }) {
               {relativeTime(run.started_at)}
             </p>
           </div>
+          {!run.is_baseline && <SetBaselineButton runId={run.run_id} />}
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">

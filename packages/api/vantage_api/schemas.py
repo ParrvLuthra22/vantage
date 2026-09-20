@@ -24,10 +24,16 @@ and ORM instances are never returned from a route directly.
 """
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+#: Mirrors vantage_eval.regression.detector.ChangeType exactly. Duplicated
+#: (not imported) so this wire-contract module stays free of any dependency
+#: on vantage_eval's internals — see the module docstring's rationale for
+#: In/Out schemas being deliberately decoupled from what produces them.
+ChangeType = Literal["regression", "improvement", "stable_pass", "stable_fail", "new", "removed"]
 
 # Max spans accepted in one ingest batch — see module docstring.
 MAX_BATCH_SPANS = 500
@@ -136,3 +142,33 @@ class EvalRunDetail(EvalRunOut):
     """Run summary plus every scenario result — the single-run endpoint."""
 
     results: list[EvalResultOut]
+
+
+class ChangeOut(BaseModel):
+    """One scenario's outcome change between a baseline and a current run.
+
+    Not `from_attributes`: built explicitly field-by-field from a
+    `vantage_eval.regression.detector.ScenarioChange` dataclass in
+    eval_routes.py, same as every other Out schema in this module — a
+    dataclass's shape is free to change without that silently becoming a
+    wire contract change here too.
+    """
+
+    external_id: str
+    change_type: ChangeType
+    baseline_passed: Optional[bool]
+    current_passed: Optional[bool]
+    baseline_llm_score: Optional[float]
+    current_llm_score: Optional[float]
+
+
+class RegressionReportOut(BaseModel):
+    """A baseline-vs-current comparison — the shape returned by
+    GET /evals/runs/{current_id}/vs/{baseline_id}."""
+
+    baseline_run_id: str
+    current_run_id: str
+    baseline_pass_rate: float
+    current_pass_rate: float
+    pass_rate_delta: float
+    changes: list[ChangeOut]

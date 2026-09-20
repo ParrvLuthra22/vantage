@@ -87,3 +87,29 @@ export interface EvalRun {
 export interface EvalRunDetail extends EvalRun {
   results: EvalResult[];
 }
+
+export type ChangeType =
+  | "regression"
+  | "improvement"
+  | "stable_pass"
+  | "stable_fail"
+  | "new"
+  | "removed";
+
+export interface ScenarioChange {
+  external_id: string;
+  change_type: ChangeType;
+  baseline_passed: boolean | null;
+  current_passed: boolean | null;
+  baseline_llm_score: number | null;
+  current_llm_score: number | null;
+}
+
+export interface RegressionReport {
+  baseline_run_id: string;
+  current_run_id: string;
+  baseline_pass_rate: number;
+  current_pass_rate: number;
+  pass_rate_delta: number;
+  changes: ScenarioChange[];
+}
