@@ -1,0 +1,27 @@
+id: out_of_scope_006
+category: out_of_scope
+complexity: single_step
+input: "Turn off the lights in my living room."
+context:
+  prior_turns: []
+  active_apps: []
+expected:
+  routed_agent: chat_agent
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+  llm_judge_prompt: |
+    User said: "{{ input }}"
+    Orchestrator routed to: {{ actual.routed_agent }}
+    Reply context: {{ actual.reasoning }}
+
+    No smart-home/IoT integration exists in Vesper's tool catalog. Score:
+      5 = clearly states it can't control smart-home devices
+      3 = declines but is confusing about why
+      1 = implies the lights were turned off
+  latency_budget_ms: 20000
+notes: |
+  Smart-home control request; no plausible partial-help tool exists (unlike
+  out_of_scope_005's search_web case), so routed_agent_matches (chat_agent) is
+  a real hard check here.

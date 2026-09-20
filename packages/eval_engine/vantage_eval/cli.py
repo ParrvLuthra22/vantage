@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+from pathlib import Path
 from uuid import UUID
 
 import click
@@ -13,6 +14,7 @@ from rich.table import Table
 from vantage_eval import persistence
 from vantage_eval.agents.mock import MockAdapter
 from vantage_eval.loader import load_suite
+from vantage_eval.regression.detector import detect_regressions
 from vantage_eval.runner import run_suite
 from vantage_eval.scorers.llm_judge import LLMJudgeScorer
 
@@ -47,6 +49,15 @@ def eval():
     is_flag=True,
     help="Mark this run as the current baseline for this suite (unsets any previous baseline)",
 )
+@click.option(
+    "--output",
+    "output_path",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,
+    help="Write this run's SuiteRun as JSON to this path (works with or without Postgres -- "
+    "e.g. for `vantage eval compare` in a CI job with no DB, see docs/vesper_routing_surface.md's "
+    "eval-gate workflow)",
+)
 def eval_run(
     suite_path: str,
     adapter: str,
@@ -55,6 +66,7 @@ def eval_run(
     verbose: bool,
     min_llm_pass: float,
     mark_baseline: bool,
+    output_path: str | None,
 ):
     """Run an evaluation suite against an agent."""
     console = Console()
@@ -96,6 +108,10 @@ def eval_run(
         verbose=verbose,
     )
 
+    if output_path is not None:
+        Path(output_path).write_text(run.model_dump_json(indent=2))
+        console.print(f"[dim]Wrote run JSON to {output_path}[/dim]")
+
     run_id = asyncio.run(persistence.persist_run(suite, run, mark_baseline=mark_baseline))
     if run_id is not None:
         baseline_note = " [bold yellow](marked as baseline)[/bold yellow]" if mark_baseline else ""
@@ -131,58 +147,83 @@ def eval_run(
 def eval_compare(
     current_run_id: str, baseline_run_id: str | None, suite: str, fail_on_regression: bool
 ):
-    """Compare a run against a baseline and print a regression report."""
+    """Compare a run against a baseline and print a regression report.
+
+    CURRENT_RUN_ID and --baseline each accept either a Postgres run UUID or
+    a path to a JSON file written by `vantage eval run --output <path>` --
+    mix and match freely (e.g. a fresh CI run's JSON against a baseline.json
+    committed to the agent's own repo, with no DB involved at all; or a live
+    DB run_id against a committed baseline.json). DATABASE_URL is only
+    required when at least one side is a UUID (or --baseline is omitted,
+    which looks up the suite's DB-marked baseline).
+    """
     console = Console()
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        console.print("[red]DATABASE_URL required[/red]")
-        raise SystemExit(2)
 
     try:
-        current_uuid = UUID(current_run_id)
-        baseline_uuid = UUID(baseline_run_id) if baseline_run_id else None
-    except ValueError as e:
-        console.print(f"[red]Invalid run ID: {e}[/red]")
+        current = asyncio.run(_load_run_arg(current_run_id, suite))
+        baseline = asyncio.run(_load_run_arg(baseline_run_id, suite))
+    except _CompareLoadError as e:
+        console.print(f"[red]{e}[/red]")
         raise SystemExit(2) from e
 
-    report = asyncio.run(_do_compare(db_url, suite, current_uuid, baseline_uuid))
-
-    if report is None:
+    if current is None or baseline is None:
         console.print(
             f"[red]Could not load baseline or current run[/red] "
-            f"(no run {current_run_id}, and no baseline marked for suite {suite!r} "
-            f"— run with --mark-baseline first, or pass --baseline explicitly)"
+            f"(no run {current_run_id!r}, and no baseline marked for suite {suite!r} "
+            f"— run with --mark-baseline first, pass --baseline explicitly, or point at a "
+            f"JSON file from `vantage eval run --output`)"
         )
         raise SystemExit(2)
 
+    report = detect_regressions(baseline, current)
     _print_regression_report(report, console)
 
     if fail_on_regression and report.has_regressions:
         raise SystemExit(1)
 
 
-async def _do_compare(db_url, suite_name, current_id, baseline_id):
+class _CompareLoadError(Exception):
+    """A run/baseline argument was malformed or DB access was needed but unavailable."""
+
+
+async def _load_run_arg(token: str | None, suite_name: str) -> "SuiteRun | None":
+    """Resolve one `compare` argument (a UUID, a JSON file path, or None
+    for 'the suite's marked baseline') into a SuiteRun, or None if not found."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    from vantage_eval.regression.detector import detect_regressions
+    from vantage_eval.models import SuiteRun
     from vantage_eval.regression.loader import db_run_to_suite_run, load_baseline_run, load_run
+
+    if token is not None and Path(token).is_file():
+        return SuiteRun.model_validate_json(Path(token).read_text())
+
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        where = (
+            f"run ID {token!r}" if token else "the suite's marked baseline (no --baseline given)"
+        )
+        raise _CompareLoadError(
+            f"DATABASE_URL required to look up {where} (or pass a path to a JSON file instead)"
+        )
+
+    if token is not None:
+        try:
+            run_uuid = UUID(token)
+        except ValueError as e:
+            raise _CompareLoadError(
+                f"{token!r} is neither an existing file nor a valid run ID"
+            ) from e
 
     engine = persistence.get_engine(db_url)
     try:
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
         async with session_factory() as session:
-            current_db = await load_run(session, current_id)
-            if baseline_id:
-                baseline_db = await load_run(session, baseline_id)
-            else:
-                baseline_db = await load_baseline_run(session, suite_name)
-
-            if not current_db or not baseline_db:
-                return None
-
-            return detect_regressions(
-                db_run_to_suite_run(baseline_db), db_run_to_suite_run(current_db)
+            db_run = (
+                await load_run(session, run_uuid)
+                if token is not None
+                else await load_baseline_run(session, suite_name)
             )
+            return db_run_to_suite_run(db_run) if db_run is not None else None
     finally:
         await engine.dispose()
 

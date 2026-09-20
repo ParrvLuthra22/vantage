@@ -1,0 +1,33 @@
+id: clear_007
+category: clear
+complexity: single_step
+input: "find flights to bangalore for friday"
+context:
+  prior_turns: []
+  active_apps: []
+expected:
+  routed_agent: search_web
+  extracted_entities:
+    query: "flights to Bangalore Friday"
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Expected agent: {{ expected.routed_agent }}
+
+    "Find flights" is an informational search, not a booking/transaction (contrast with
+    out_of_scope_001's "book me a flight" — no tool exists for a real purchase, but
+    search_web is a genuinely correct, available answer to "find" options). Score whether
+    the destination ("bangalore") and day ("friday") both appear in the search query:
+      5 = search_web called, query mentions both Bangalore and Friday
+      3 = search_web called but the query drops the destination or the day
+      1 = doesn't call search_web and doesn't honestly say it can't search flights
+  latency_budget_ms: 20000
+notes: |
+  Originally written expecting search_agent — Vesper's real equivalent tool is search_web,
+  so this is a near-trivial Bucket B rename rather than a full rewrite: the underlying
+  request (an informational search) genuinely IS answerable by a real Vesper tool, unlike
+  most of this scenario's clear_* siblings.

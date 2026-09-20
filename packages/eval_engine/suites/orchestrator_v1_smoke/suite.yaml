@@ -1,0 +1,14 @@
+name: orchestrator_v1_smoke
+description: >
+  Fast PR-gate subset of orchestrator_v1 (10 of 40 scenarios, 2 per category)
+  for Vesper's eval-gate CI workflow. Selected to (a) run with --no-judge --
+  every scenario here has a real, judge-independent rubric.hard_checks entry,
+  since the full suite's many hard_checks: [] "honesty" scenarios would
+  vacuously pass under --no-judge and provide zero gating signal -- and
+  (b) mix real-tool and chat_agent expectations, so both "orchestrator
+  over-eagerly calls tools" and "orchestrator never calls tools" regressions
+  get caught. Not a replacement for the full orchestrator_v1 suite's own
+  baseline/dashboard tracking -- this is a separate, narrower artifact
+  scoped to CI's time/cost budget. See docs/vesper_routing_surface.md for
+  why these particular destinations are the real ones to check against.
+agent_target: orchestrator.planner

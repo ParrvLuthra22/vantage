@@ -1,0 +1,33 @@
+id: clear_002
+category: clear
+complexity: single_step
+input: "what's the weather in delhi tomorrow"
+context:
+  prior_turns: []
+  active_apps: ["Weather"]
+expected:
+  routed_agent: search_web
+  extracted_entities:
+    query: "weather in Delhi tomorrow"
+  refuse: false
+rubric:
+  hard_checks:
+    - routed_agent_matches
+  llm_judge_prompt: |
+    User: "{{ input }}"
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+    Vesper has no dedicated weather tool, but does have search_web — a defensible,
+    available path to a live answer, unlike a request with no plausible tool at all. Score
+    whether search_web was called with a query that captures both the location ("delhi")
+    and the relative date ("tomorrow"):
+      5 = search_web called, query mentions both Delhi and tomorrow/the date
+      3 = search_web called but the query drops the location or the date
+      1 = doesn't call search_web and doesn't honestly say it lacks live weather data
+          (e.g. states a specific forecast as fact with no search)
+  latency_budget_ms: 20000
+notes: |
+  Originally written expecting weather_agent — a fictional agent that doesn't exist in
+  Vesper's real catalog. Rewritten 2026-09-15 (Bucket B) to expect search_web, the real tool
+  that actually serves this request, preserving the original location+date extraction intent
+  via the query argument instead of dedicated location/time entity fields.
