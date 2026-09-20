@@ -1,8 +1,10 @@
-"""Vantage CLI: `vantage eval run|list|show`."""
+"""Vantage CLI: `vantage eval run|compare`."""
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
+from uuid import UUID
 
 import click
 from rich.console import Console
@@ -103,8 +105,130 @@ def eval_run(
 
     _print_scorecard(run, console)
 
+    if run_id is not None:
+        console.print()
+        console.print(f"[dim]Run ID:[/dim] [cyan]{run_id}[/cyan]")
+        console.print(f"[dim]Compare: vantage eval compare {run_id}[/dim]")
+
     # Exit code = number of failed scenarios (useful for CI gating)
     raise SystemExit(0 if run.summary.failed == 0 else 1)
+
+
+@eval.command("compare")
+@click.argument("current_run_id")
+@click.option(
+    "--baseline",
+    "baseline_run_id",
+    default=None,
+    help="Baseline run ID (default: current marked baseline for the suite)",
+)
+@click.option(
+    "--suite", default="orchestrator_v1", help="Suite name (used when --baseline not specified)"
+)
+@click.option(
+    "--fail-on-regression", is_flag=True, help="Exit non-zero if any regressions detected (CI mode)"
+)
+def eval_compare(
+    current_run_id: str, baseline_run_id: str | None, suite: str, fail_on_regression: bool
+):
+    """Compare a run against a baseline and print a regression report."""
+    console = Console()
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        console.print("[red]DATABASE_URL required[/red]")
+        raise SystemExit(2)
+
+    try:
+        current_uuid = UUID(current_run_id)
+        baseline_uuid = UUID(baseline_run_id) if baseline_run_id else None
+    except ValueError as e:
+        console.print(f"[red]Invalid run ID: {e}[/red]")
+        raise SystemExit(2) from e
+
+    report = asyncio.run(_do_compare(db_url, suite, current_uuid, baseline_uuid))
+
+    if report is None:
+        console.print(
+            f"[red]Could not load baseline or current run[/red] "
+            f"(no run {current_run_id}, and no baseline marked for suite {suite!r} "
+            f"— run with --mark-baseline first, or pass --baseline explicitly)"
+        )
+        raise SystemExit(2)
+
+    _print_regression_report(report, console)
+
+    if fail_on_regression and report.has_regressions:
+        raise SystemExit(1)
+
+
+async def _do_compare(db_url, suite_name, current_id, baseline_id):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from vantage_eval.regression.detector import detect_regressions
+    from vantage_eval.regression.loader import db_run_to_suite_run, load_baseline_run, load_run
+
+    engine = persistence.get_engine(db_url)
+    try:
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            current_db = await load_run(session, current_id)
+            if baseline_id:
+                baseline_db = await load_run(session, baseline_id)
+            else:
+                baseline_db = await load_baseline_run(session, suite_name)
+
+            if not current_db or not baseline_db:
+                return None
+
+            return detect_regressions(
+                db_run_to_suite_run(baseline_db), db_run_to_suite_run(current_db)
+            )
+    finally:
+        await engine.dispose()
+
+
+def _print_regression_report(report, console: Console):
+    console.print()
+    console.print("[bold]Regression Report[/bold]")
+    console.print(f"Baseline: {report.baseline_run_id[:8]}  Current: {report.current_run_id[:8]}")
+    delta_pct = report.pass_rate_delta * 100
+    delta_style = "green" if delta_pct >= 0 else "red"
+    console.print(
+        f"Pass rate: {report.baseline_pass_rate:.1%} -> {report.current_pass_rate:.1%} "
+        f"([{delta_style}]{delta_pct:+.1f}pp[/{delta_style}])"
+    )
+    console.print()
+
+    counts: dict[str, int] = {}
+    for c in report.changes:
+        counts[c.change_type] = counts.get(c.change_type, 0) + 1
+
+    summary = Table(show_header=False, box=None)
+    summary.add_column(style="dim")
+    summary.add_column()
+    for k in ["regression", "improvement", "stable_pass", "stable_fail", "new", "removed"]:
+        v = counts.get(k, 0)
+        if k == "regression" and v > 0:
+            color = "red"
+        elif k == "improvement" and v > 0:
+            color = "green"
+        else:
+            color = "dim"
+        summary.add_row(k, f"[{color}]{v}[/{color}]")
+    console.print(summary)
+
+    if report.regressions:
+        console.print()
+        console.print("[bold red]Regressions:[/bold red]")
+        for c in report.regressions:
+            failures = ", ".join(c.current_deterministic_failures) or "llm judge"
+            console.print(f"  [red]✗[/red] {c.external_id}: {failures}")
+
+    if report.improvements:
+        console.print()
+        console.print("[bold green]Improvements:[/bold green]")
+        for c in report.improvements:
+            console.print(f"  [green]✓[/green] {c.external_id}")
 
 
 def _current_git_sha() -> str:

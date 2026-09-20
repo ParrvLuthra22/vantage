@@ -47,9 +47,12 @@ def _resolve_url(raw_url: str):
     return url.set(query=query)
 
 
-def _get_engine():
-    url = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
-    return create_async_engine(_resolve_url(url), pool_pre_ping=True)
+def get_engine(url: Optional[str] = None):
+    """Build an async engine for `url`, or `DATABASE_URL`/the local default
+    if not given. Public: also used by `vantage eval compare` to open its
+    own session against the same DB persist_run just wrote to."""
+    resolved = url or os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
+    return create_async_engine(_resolve_url(resolved), pool_pre_ping=True)
 
 
 async def persist_run(
@@ -61,7 +64,7 @@ async def persist_run(
     mark it as the suite's baseline. Returns the persisted run_id, or None if
     persistence failed (a warning is logged; the caller should keep going).
     """
-    engine = _get_engine()
+    engine = get_engine()
     try:
         session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
         async with session_factory() as session:
