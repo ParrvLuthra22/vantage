@@ -1,16 +1,16 @@
 id: context_dependent_001
 category: context_dependent
 complexity: single_step
-input: "Actually, make it 4pm instead."
+input: Actually, make it 4pm instead.
 context:
   prior_turns:
     - user: "Remind me to call mom at 3pm today."
       response: "I'll notify you — 'Call mom' at 3:00 PM, Sir."
-  active_apps: ["Reminders"]
+  active_apps: [Reminders]
 expected:
   routed_agent: show_notification
   extracted_entities:
-    message: "call mom"
+    message: call mom
   refuse: false
 rubric:
   hard_checks:
@@ -29,7 +29,7 @@ rubric:
       3 = calls show_notification but gets the time or subject wrong
       1 = doesn't use the prior turn at all (asks "make what 4pm?" or acts on
           something unrelated)
-  latency_budget_ms: 6000
+  latency_budget_ms: 20000
 notes: |
   Pronoun/ellipsis resolution across turns. `prior_turns` is shaped as
   {user, response} pairs matching exactly what

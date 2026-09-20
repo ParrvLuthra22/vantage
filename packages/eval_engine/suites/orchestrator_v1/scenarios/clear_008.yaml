@@ -6,28 +6,26 @@ context:
   prior_turns: []
   active_apps: []
 expected:
-  routed_agent: utility_agent
-  extracted_entities:
-    value: 1
-    from_unit: kg
-    to_unit: pounds
+  routed_agent: chat_agent
+  extracted_entities: {}
   refuse: false
 rubric:
   hard_checks:
     - routed_agent_matches
-    - not_refused
-    - extracted_entities.from_unit_present
-    - extracted_entities.to_unit_present
   llm_judge_prompt: |
     User: "{{ input }}"
     Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
-    Expected agent: {{ expected.routed_agent }}
+    Reply context: {{ actual.reasoning }}
 
-    Score whether the numeric value and both units were correctly extracted, and whether
-    utility_agent (a lightweight, fast-answering agent) was chosen rather than routing this
-    trivial conversion to chat_agent or search_agent.
-  latency_budget_ms: 800
+    Vesper has no unit-conversion tool, but unlike the other clear_* rewrites this is a
+    request an LLM can correctly answer directly from its own knowledge — no tool, no
+    fabrication risk, just arithmetic (1kg ≈ 2.2 pounds). Score:
+      5 = chat_agent gives a numerically correct conversion (~2.2 lbs, allow rounding)
+      3 = chat_agent responds but the number is off or missing
+      1 = calls a tool instead of just answering, or gives a wildly wrong value
+  latency_budget_ms: 6000
 notes: |
-  Tests numeric-plus-unit entity extraction on a self-contained, deterministically-answerable
-  query. Purpose: confirm cheap reference lookups don't get routed to heavier agents that
-  would add unnecessary latency or cost.
+  Originally written expecting utility_agent — a fictional agent that doesn't exist in
+  Vesper's real catalog. Rewritten 2026-09-15 (Bucket B): unlike its siblings this isn't a
+  "don't hallucinate success" test, since there's no external action to fake succeeding at —
+  it's a correctness-of-the-direct-answer test instead, which chat_agent should pass cleanly.

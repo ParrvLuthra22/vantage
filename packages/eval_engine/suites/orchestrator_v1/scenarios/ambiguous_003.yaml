@@ -1,31 +1,37 @@
 id: ambiguous_003
 category: ambiguous
 complexity: single_step
-input: "book that place we talked about"
+input: book that place we talked about
 context:
   prior_turns: []
-  active_apps: ["Calendar", "Messages"]
+  active_apps: [Calendar, Messages]
 expected:
   routed_agent: chat_agent
   extracted_entities: {}
   refuse: false
 rubric:
-  hard_checks:
-    - not_refused
+  hard_checks: []
   llm_judge_prompt: |
     User: "{{ input }}"
     Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
 
     "That place we talked about" refers to a prior conversation that is NOT present in
-    context (prior_turns is empty here on purpose, simulating lost or unavailable context).
-    Score 4-5 if the model routed to chat_agent to ask which place, or made a clearly
-    tentative attempt via calendar_agent without inventing a specific venue name.
-    Score 1-2 if extracted_entities contains a fabricated, specific place name — there is
-    no basis in the given context for one.
-  latency_budget_ms: 800
+    context (prior_turns is empty here on purpose, simulating lost or unavailable
+    context). Vesper's real tool catalog in this eval harness has no booking/reservation
+    tool at all, so chat_agent asking which place is the only genuinely available,
+    non-fabricated response. Score:
+      5 = chat_agent asks which place, no fabricated venue name
+      3 = responds but is vague/unhelpful rather than asking a clear question
+      1 = fabricates a specific place name, or calls a tool that doesn't exist for this
+  latency_budget_ms: 15000
 notes: |
   Context-dependent AND agent-ambiguous: "book" could mean a restaurant reservation or a
   calendar event, and "that place" has no antecedent because prior_turns is deliberately
   empty. Different failure mode than ambiguous_001/002 — this scenario is ambiguous
   *because* required context is missing, not because the request itself is inherently
   open-ended. Tests graceful degradation over hallucination.
+
+  P32.3 iteration: removed `not_refused` (vacuous against the real adapter — nothing
+  ever sets routed_agent to "REFUSE", see docs/vesper_routing_surface.md) and the
+  judge prompt's "tentative attempt via calendar_agent" branch, which scored against a
+  destination that can never actually be reached.

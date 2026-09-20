@@ -1,30 +1,38 @@
 id: ambiguous_007
 category: ambiguous
 complexity: single_step
-input: "add another one"
+input: add another one
 context:
   prior_turns: []
-  active_apps: ["Notes"]
+  active_apps: [Notes]
 expected:
-  routed_agent: shopping_agent
+  routed_agent: chat_agent
   extracted_entities: {}
   refuse: false
 rubric:
-  hard_checks:
-    - not_refused
+  hard_checks: []
   llm_judge_prompt: |
     User: "{{ input }}"
-    Available agents: shopping_agent (shopping list), notes_agent (freeform notes),
-    list_agent (generic lists).
     Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
 
     "Another one" presupposes a specific list was just being discussed, but prior_turns is
     empty here — there's no way to know which list, or what item, without that context.
-    Score 4-5 for shopping_agent, notes_agent, list_agent, or chat_agent asking for
-    clarification. Score 1-2 for an unrelated agent, or for fabricating a specific item name.
-  latency_budget_ms: 800
+    Vesper's real tool catalog in this eval harness has no shopping-list or notes-writing
+    tool at all, so chat_agent asking for clarification is the only genuinely available,
+    non-fabricated response. Score:
+      5 = chat_agent asks what to add and to which list, no fabricated item/list name
+      3 = responds but is vague/unhelpful rather than asking a clear question
+      1 = fabricates a specific item or list, or calls a tool that doesn't exist for this
+  latency_budget_ms: 15000
 notes: |
   Closest sibling to clear_004 ("add milk to my shopping list") but with the list type and
   the item both stripped out, leaving only a bare pronoun ("another one"). Contrast pair:
   clear_004 shows explicit naming resolves ambiguity; this scenario shows what's left when
   that naming is removed and no prior turn supplies it.
+
+  P32.3 iteration: this scenario was missed by the earlier Bucket B pass — still
+  expected the fictional shopping_agent and referenced fictional notes_agent/list_agent
+  as "Available agents" in its own judge prompt. Rewritten to match clear_004's real
+  finding (no shopping-list tool exists at all; capability gap filed as vesper#2) and
+  ambiguous_001's dual-branch-free style, since no real tool applies here at all (unlike
+  ambiguous_001's show_notification option).

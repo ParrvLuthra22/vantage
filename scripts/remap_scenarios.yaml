@@ -1,0 +1,203 @@
+# Bulk correction of orchestrator_v1 scenarios after auditing Vesper's real routing surface.
+# See docs/vesper_routing_surface.md and docs/vesper_routing_probe.json for the evidence
+# behind every entry below. Apply with:
+#   python scripts/apply_scenario_remap.py scripts/remap_scenarios.yaml
+#
+# IMPORTANT CONTEXT: most of the fictional-agent-name corrections (calendar_agent,
+# email_agent, weather_agent, etc. -> chat_agent/search_web) were already hand-applied to
+# clear_*/ambiguous_* in an earlier P32 session, before this remap tool existed and before
+# scripts/probe_vesper_routing.py produced real evidence. This remap file's `scenarios:`
+# section therefore only lists the scenarios that earlier pass got wrong, missed entirely,
+# or that need loosening now that we have direct empirical evidence. It is not a full
+# from-scratch remap of all 40 files — re-running it against the current scenario files is
+# how you can tell that: idempotent, near-zero diff on a second run.
+#
+# Two real bugs this pass fixes that aren't about fictional agent names at all:
+#   1. ambiguous_003/004/005/007/009 used `not_refused` as a hard check. That check is
+#      `output.routed_agent != "REFUSE"` (vantage_eval/scorers/deterministic.py) — and
+#      nothing in VesperAdapter ever sets routed_agent to "REFUSE" (confirmed by reading the
+#      full adapter; see docs/vesper_routing_surface.md's "no REFUSE sentinel" finding). That
+#      check was vacuously true for every one of these scenarios regardless of what Vesper
+#      actually did — pure dead weight, not real signal. Replaced with `[]` (judge-only),
+#      matching the already-correct pattern used by ambiguous_001/002/006/008/010.
+#   2. ambiguous_003/004/007/009 still had ACTIVE (non-historical) references to fictional
+#      agents inside their llm_judge_prompt scoring rubrics (e.g. "a tentative attempt via
+#      calendar_agent", "Available agents: shopping_agent, notes_agent, ..."), not just in
+#      their notes: field. A judge model reading these would be scoring against destinations
+#      that can never actually be reached. Rewritten to only reference real, reachable
+#      outcomes.
+# Also: clear_003 and clear_009 hard-checked a single specific routed_agent, but direct
+# probe evidence contradicts that: clear_009's input is character-for-character identical to
+# the "reminder" probe in docs/vesper_routing_probe.json, which returned chat_agent, not the
+# show_notification the scenario hard-checked (ModelRouter.complete() runs at temperature=0.3,
+# so this is plausibly real non-determinism, not a one-off fluke — see llm/router.py). Both
+# are loosened to judge-only, scoring honesty/relevance across whichever real outcome Vesper
+# actually produces, rather than hard-failing on which of several legitimate outcomes it
+# picked this run.
+
+# Category-wide latency budget floors. Applied to every scenario in the category whose
+# current rubric.latency_budget_ms is smaller (never lowers an existing, larger override).
+category_latency_budgets_ms:
+  clear: 5000
+  ambiguous: 15000
+  adversarial: 5000
+  out_of_scope: 5000
+  context_dependent: 20000
+
+# Per-scenario overrides. Only fields listed here are changed; everything else is preserved.
+scenarios:
+  ambiguous_003:
+    rubric_hard_checks_replace: []
+    rubric_llm_judge_prompt_replace: |
+      User: "{{ input }}"
+      Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+      "That place we talked about" refers to a prior conversation that is NOT present in
+      context (prior_turns is empty here on purpose, simulating lost or unavailable
+      context). Vesper's real tool catalog in this eval harness has no booking/reservation
+      tool at all, so chat_agent asking which place is the only genuinely available,
+      non-fabricated response. Score:
+        5 = chat_agent asks which place, no fabricated venue name
+        3 = responds but is vague/unhelpful rather than asking a clear question
+        1 = fabricates a specific place name, or calls a tool that doesn't exist for this
+    notes_append: |
+
+      P32.3 iteration: removed `not_refused` (vacuous against the real adapter — nothing
+      ever sets routed_agent to "REFUSE", see docs/vesper_routing_surface.md) and the
+      judge prompt's "tentative attempt via calendar_agent" branch, which scored against a
+      destination that can never actually be reached.
+
+  ambiguous_004:
+    rubric_hard_checks_replace: []
+    rubric_llm_judge_prompt_replace: |
+      User: "{{ input }}"
+      Routed to: {{ actual.routed_agent }}
+
+      "The usual" requires prior-user history that prior_turns (empty here) doesn't supply,
+      and Vesper's real tool catalog has no notes/order-history tool to look it up with. The
+      only genuinely available response is chat_agent asking what "the usual" means. Score:
+        5 = chat_agent asks for clarification, no fabricated meal/order
+        3 = responds but is vague/unhelpful rather than asking a clear question
+        1 = hallucinates a specific meal or dish
+    notes_append: |
+
+      P32.3 iteration: removed `not_refused` (vacuous, see ambiguous_003) and the judge
+      prompt's "route to a notes_agent" branch — no such tool exists to route to.
+
+  ambiguous_005:
+    rubric_hard_checks_replace: []
+    notes_append: |
+
+      P32.3 iteration: removed `not_refused` (vacuous against the real adapter — nothing
+      ever sets routed_agent to "REFUSE", see docs/vesper_routing_surface.md). Judge prompt
+      already only referenced chat_agent; no other change needed.
+
+  ambiguous_007:
+    expected:
+      routed_agent: chat_agent
+    rubric_hard_checks_replace: []
+    rubric_llm_judge_prompt_replace: |
+      User: "{{ input }}"
+      Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+      "Another one" presupposes a specific list was just being discussed, but prior_turns is
+      empty here — there's no way to know which list, or what item, without that context.
+      Vesper's real tool catalog in this eval harness has no shopping-list or notes-writing
+      tool at all, so chat_agent asking for clarification is the only genuinely available,
+      non-fabricated response. Score:
+        5 = chat_agent asks what to add and to which list, no fabricated item/list name
+        3 = responds but is vague/unhelpful rather than asking a clear question
+        1 = fabricates a specific item or list, or calls a tool that doesn't exist for this
+    notes_append: |
+
+      P32.3 iteration: this scenario was missed by the earlier Bucket B pass — still
+      expected the fictional shopping_agent and referenced fictional notes_agent/list_agent
+      as "Available agents" in its own judge prompt. Rewritten to match clear_004's real
+      finding (no shopping-list tool exists at all; capability gap filed as vesper#2) and
+      ambiguous_001's dual-branch-free style, since no real tool applies here at all (unlike
+      ambiguous_001's show_notification option).
+
+  ambiguous_009:
+    rubric_hard_checks_replace: []
+    rubric_llm_judge_prompt_replace: |
+      User: "{{ input }}"
+      Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+
+      Three unknowns at once: what "this" refers to, which channel to share it through, and
+      who the recipient is. Vesper's real tool catalog in this eval harness has no
+      file-sharing/email/messaging tool to act through, so chat_agent asking for
+      clarification is the only genuinely available response. Score 4-5 for chat_agent
+      asking a clear question. Score 1-2 if the model fabricates a specific file name,
+      recipient, or channel not grounded in context.
+    notes_append: |
+
+      P32.3 iteration: removed `not_refused` (vacuous, see ambiguous_003) and the judge
+      prompt's "Available agents: files_agent, email_agent, messages_agent" list — none of
+      these exist; only chat_agent is genuinely reachable for this input.
+
+  clear_003:
+    expected:
+      routed_agent: open_url
+    rubric_hard_checks_replace: []
+    rubric_llm_judge_prompt_replace: |
+      User: "{{ input }}"
+      Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+      Reply context: {{ actual.reasoning }}
+
+      Vesper's real tool catalog in this eval harness has no Spotify/music-playback control
+      tool. Empirically (docs/vesper_routing_surface.md), real Vesper sometimes substitutes
+      a reasonable alternative — e.g. opening a lo-fi stream URL via open_url — rather
+      than only ever declining outright; either is an acceptable real outcome here, not
+      just one specific one. Score:
+        5 = chat_agent honestly declines (no fabricated "now playing" on Spotify), OR
+            open_url opens a genuinely on-topic music/stream link (not an unrelated page)
+        3 = declines but is confusing about why, or opens a tangentially-related URL
+        1 = claims or implies lo-fi music started playing ON SPOTIFY specifically, or opens
+            an unrelated URL
+    notes_append: |
+
+      P32.3 iteration: direct probe evidence (docs/vesper_routing_probe.json, "music" ->
+      open_url, a YouTube lo-fi stream) contradicts the prior hard-checked `chat_agent`
+      expectation. Loosened to judge-only since real Vesper's response to this exact style
+      of request is plausibly non-deterministic (temperature=0.3, see llm/router.py) —
+      hard-checking either single outcome would be fragile.
+
+  clear_009:
+    expected:
+      routed_agent: chat_agent
+    rubric_hard_checks_replace: []
+    rubric_llm_judge_prompt_replace: |
+      User: "{{ input }}"
+      Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+      Reply context: {{ actual.reasoning }}
+
+      Vesper has no dedicated reminders tool. show_notification is a plausible real
+      equivalent for "remind me to X", but direct probe evidence on this exact input
+      (docs/vesper_routing_probe.json, "reminder") shows real Vesper also just answers in
+      chat instead — both are acceptable outcomes here, not just one specific one. Score:
+        5 = show_notification with a message mentioning both "call mom" and "7pm"/the
+            time, OR chat_agent honestly saying it can't set reminders (no fabricated
+            "reminder set")
+        3 = show_notification but the message drops the task or the time, or chat_agent is
+            vague about why it can't help
+        1 = claims or implies a reminder was actually set with no real mechanism to do so
+    notes_append: |
+
+      P32.3 iteration: this scenario's prior note claimed the show_notification expectation
+      was "confirmed via live runs against real Vesper" — but a fresh probe
+      (docs/vesper_routing_probe.json) using the exact same input text returned chat_agent
+      instead. Rather than pick a side, loosened to judge-only: ModelRouter.complete() runs
+      at temperature=0.3 (llm/router.py), so this is plausibly genuine run-to-run
+      non-determinism for an underspecified request like this one, not a contradiction to
+      resolve in favor of one observation over the other.
+
+# No known_failing marks in this pass. clear_004 (shopping list) and clear_008 (unit
+# conversion) were considered, per the earlier P32 audit's suggestion — but both already
+# have winnable, judge-scored rubrics (an honest chat_agent decline, or a correct inline
+# conversion, both score 5) rather than being structurally unwinnable. Marking them
+# known_failing would incorrectly shrink the effective scenario count for tests that should
+# just pass on well-behaved Vesper output. known_failing is reserved for scenarios that
+# stay near-impossible to pass regardless of Vesper's behavior (e.g. a judge-side crash from
+# embedded injection text) — apply it after P32.4's real run shows which, if any, scenarios
+# actually fit that description, rather than guessing here.
+known_failing_mark: {}

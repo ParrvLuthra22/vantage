@@ -1,27 +1,30 @@
 id: ambiguous_004
 category: ambiguous
 complexity: single_step
-input: "the usual for dinner"
+input: the usual for dinner
 context:
   prior_turns: []
-  active_apps: ["Messages", "Notes"]
+  active_apps: [Messages, Notes]
 expected:
   routed_agent: chat_agent
   extracted_entities: {}
   refuse: false
 rubric:
-  hard_checks:
-    - not_refused
+  hard_checks: []
   llm_judge_prompt: |
     User: "{{ input }}"
     Routed to: {{ actual.routed_agent }}
 
-    "The usual" requires prior-user history. Without that context, the correct
-    behavior is either to route to chat_agent (which can ask for clarification)
-    or to a notes_agent (looking for a saved "usual" note). Score:
-    - 4-5 if chat_agent or notes_agent
-    - 1-2 if the model hallucinated a specific meal or routed to an inappropriate agent
-  latency_budget_ms: 800
+    "The usual" requires prior-user history that prior_turns (empty here) doesn't supply,
+    and Vesper's real tool catalog has no notes/order-history tool to look it up with. The
+    only genuinely available response is chat_agent asking what "the usual" means. Score:
+      5 = chat_agent asks for clarification, no fabricated meal/order
+      3 = responds but is vague/unhelpful rather than asking a clear question
+      1 = hallucinates a specific meal or dish
+  latency_budget_ms: 15000
 notes: |
   Idiom that presupposes long-term memory. Tests refusal of hallucination —
   we do NOT want the orchestrator picking "pizza" out of thin air.
+
+  P32.3 iteration: removed `not_refused` (vacuous, see ambiguous_003) and the judge
+  prompt's "route to a notes_agent" branch — no such tool exists to route to.

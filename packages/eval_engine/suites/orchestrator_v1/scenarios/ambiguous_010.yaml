@@ -1,33 +1,39 @@
 id: ambiguous_010
 category: ambiguous
 complexity: single_step
-input: "help me with the pitch"
+input: help me with the pitch
 context:
   prior_turns: []
-  active_apps: ["Notes", "Files"]
+  active_apps: [Notes, Files]
 expected:
-  routed_agent: writing_agent
-  extracted_entities:
-    subject: pitch
+  routed_agent: chat_agent
+  extracted_entities: {}
   refuse: false
 rubric:
-  hard_checks:
-    - not_refused
-    - extracted_entities.subject_present
+  hard_checks: []
+  # No extracted_entities.subject_present — same reasoning as ambiguous_006:
+  # chat_agent always has empty extracted_entities, so this check would fail
+  # every good response.
   llm_judge_prompt: |
     User: "{{ input }}"
-    Available agents: writing_agent (draft text), presentation_agent (build slides),
-    research_agent (gather supporting information).
     Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Reply context: {{ actual.reasoning }}
 
-    "Help with the pitch" could mean drafting the pitch text, building slides for it, or
-    researching material to support it — all are legitimate readings. Score 4-5 for
-    writing_agent, presentation_agent, or research_agent. Score 1-2 for an unrelated agent
-    (e.g. calendar_agent, messages_agent).
-  latency_budget_ms: 800
+    "Help with the pitch" could mean drafting text, building slides, or researching support
+    material — all legitimate readings, and genuinely underspecified which one is wanted.
+    Vesper has no dedicated writing/presentation/research tool in this eval harness, but
+    chat_agent can directly start helping (e.g. asking which of those three, or offering to
+    draft an opening line) without needing any tool. search_web is also defensible if it's
+    framed as researching support material. Score:
+    - 5 if chat_agent engages helpfully (asks which angle, or starts drafting) or search_web
+      is used for supporting research, without fabricating pitch content as if it already
+      knew what the pitch was about
+    - 1-2 if it routes to something unrelated (e.g. a calendar/messaging action) or invents
+      specific pitch content with no basis
+  latency_budget_ms: 15000
 notes: |
-  Tests routing among adjacent "creative work" agents that could all legitimately
-  contribute to one loosely-scoped request. "Pitch" is extractable as the subject even
-  though the concrete task (writing vs. slides vs. research) is genuinely underspecified —
-  this scenario probes agent-boundary ambiguity within a single domain, unlike
-  ambiguous_001 which spans structurally different domains (calendar/notes/reminders).
+  Originally written expecting writing_agent/presentation_agent/research_agent — fictional
+  agents that don't exist in Vesper's real catalog, with a subject_present hard check that
+  structurally conflicts with chat_agent (now the primary accepted answer) always having
+  empty entities. Rewritten 2026-09-15 (Bucket B); the underlying agent-boundary-ambiguity
+  test is preserved via the judge prompt's three readings.

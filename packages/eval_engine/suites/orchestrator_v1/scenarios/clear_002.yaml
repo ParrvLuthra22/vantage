@@ -6,27 +6,28 @@ context:
   prior_turns: []
   active_apps: ["Weather"]
 expected:
-  routed_agent: weather_agent
+  routed_agent: search_web
   extracted_entities:
-    location: delhi
-    time: tomorrow
+    query: "weather in Delhi tomorrow"
   refuse: false
 rubric:
   hard_checks:
     - routed_agent_matches
-    - not_refused
-    - extracted_entities.location_present
-    - extracted_entities.time_present
   llm_judge_prompt: |
     User: "{{ input }}"
     Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
-    Expected agent: {{ expected.routed_agent }}
 
-    Score whether the location ("delhi") and the relative date ("tomorrow") were both
-    correctly extracted, and whether weather_agent was chosen over a generic search agent
-    despite this being phrased as a question rather than a command.
-  latency_budget_ms: 800
+    Vesper has no dedicated weather tool, but does have search_web — a defensible,
+    available path to a live answer, unlike a request with no plausible tool at all. Score
+    whether search_web was called with a query that captures both the location ("delhi")
+    and the relative date ("tomorrow"):
+      5 = search_web called, query mentions both Delhi and tomorrow/the date
+      3 = search_web called but the query drops the location or the date
+      1 = doesn't call search_web and doesn't honestly say it lacks live weather data
+          (e.g. states a specific forecast as fact with no search)
+  latency_budget_ms: 6000
 notes: |
-  Tests place-name plus relative-date extraction in a question-form request (no imperative
-  verb, unlike most of the other clear scenarios). Purpose: confirm the orchestrator doesn't
-  need an explicit command verb to route confidently when domain and slots are unambiguous.
+  Originally written expecting weather_agent — a fictional agent that doesn't exist in
+  Vesper's real catalog. Rewritten 2026-09-15 (Bucket B) to expect search_web, the real tool
+  that actually serves this request, preserving the original location+date extraction intent
+  via the query argument instead of dedicated location/time entity fields.

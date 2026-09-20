@@ -1,29 +1,33 @@
 id: ambiguous_008
 category: ambiguous
 complexity: single_step
-input: "cancel it"
+input: cancel it
 context:
   prior_turns: []
-  active_apps: ["Calendar", "Mail"]
+  active_apps: [Calendar, Mail]
 expected:
-  routed_agent: calendar_agent
+  routed_agent: chat_agent
   extracted_entities: {}
   refuse: false
 rubric:
-  hard_checks:
-    - not_refused
+  hard_checks: []
   llm_judge_prompt: |
     User: "{{ input }}"
-    Available agents: calendar_agent (cancel an event), email_agent (cancel/unsend a
-    scheduled email).
     Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
 
-    "Cancel it" applies naturally to both a calendar event and a scheduled email, and with
-    no prior_turns there is no way to know which. Score 4-5 for calendar_agent or
-    email_agent, 1-2 for an unrelated agent or for inventing details about what is being
-    cancelled (a specific event name, time, or email subject) that aren't in context.
-  latency_budget_ms: 800
+    "Cancel it" applies naturally to a calendar event or a scheduled email, and with no
+    prior_turns there is no way to know which. Vesper's real tool catalog in this eval
+    harness has no calendar or email cancellation tool at all (no apple_pim/Gmail MCP
+    server is connected — see vantage_eval/agents/vesper.py), so the only genuinely
+    available, non-fabricated response is chat_agent asking what "it" refers to. Score:
+      5 = chat_agent asks a clarifying question about what to cancel, without inventing a
+          specific event name, time, or email subject that isn't in context
+      3 = chat_agent responds but is vague/unhelpful rather than asking a clear question
+      1 = fabricates a specific cancelled item, or calls a tool that doesn't exist for this
+  latency_budget_ms: 15000
 notes: |
-  Bare verb-plus-pronoun command with no object noun at all. Tests that the orchestrator
-  doesn't overcommit to a specific cancelled entity it has no basis for — the correct
-  behavior is picking a defensible target agent, not fabricating what "it" was.
+  Bare verb-plus-pronoun command with no object noun at all. Originally written expecting
+  calendar_agent/email_agent — fictional agents that don't exist in Vesper's real catalog
+  (confirmed in P31/P32; see docs/baselines notes). Rewritten 2026-09-15 (Bucket B) to score
+  what Vesper can actually produce: the test is whether it fabricates a cancelled entity it
+  has no basis for, not which of two nonexistent tools it picks.

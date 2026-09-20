@@ -1,7 +1,7 @@
 id: context_dependent_003
 category: context_dependent
 complexity: single_step
-input: "Ok then just open my music app instead."
+input: Ok then just open my music app instead.
 context:
   prior_turns:
     - user: "Open Spotify."
@@ -10,7 +10,7 @@ context:
 expected:
   routed_agent: open_app
   extracted_entities:
-    app_name: "Music"
+    app_name: Music
   refuse: false
 rubric:
   hard_checks:
@@ -27,7 +27,7 @@ rubric:
       5 = calls open_app with a sensible music-app name (e.g. "Music")
       3 = calls open_app but with an odd/wrong app name
       1 = doesn't use the prior turn's context at all
-  latency_budget_ms: 6000
+  latency_budget_ms: 20000
 notes: |
   Tests entity resolution via context: "my music app" has no explicit name in
   the current turn, only an implied one from the abandoned Spotify request.

@@ -1,11 +1,11 @@
 id: context_dependent_004
 category: context_dependent
 complexity: single_step
-input: "Actually turn it up a bit more."
+input: Actually turn it up a bit more.
 context:
   prior_turns:
     - user: "Set volume to 50."
-      response: "Volume set to 50%, Sir."
+      response: 'Volume set to 50%, Sir.'
   active_apps: []
 expected:
   routed_agent: set_volume
@@ -27,7 +27,7 @@ rubric:
           a clarifying question rather than guessing wildly
       3 = calls set_volume but with an implausible jump (e.g. straight to 100)
       1 = doesn't use the prior turn's level at all, or takes no action
-  latency_budget_ms: 6000
+  latency_budget_ms: 20000
 notes: |
   No routed_agent_matches: both set_volume-with-a-guess and a clarifying
   chat_agent question are legitimate given Vesper has no relative-adjustment

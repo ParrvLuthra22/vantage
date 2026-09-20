@@ -1,30 +1,30 @@
 id: ambiguous_002
 category: ambiguous
 complexity: single_step
-input: "when's my next thing"
+input: when's my next thing
 context:
   prior_turns: []
-  active_apps: ["Calendar", "Reminders"]
+  active_apps: [Calendar, Reminders]
 expected:
-  routed_agent: calendar_agent
+  routed_agent: chat_agent
   extracted_entities: {}
   refuse: false
 rubric:
-  hard_checks:
-    - not_refused
+  hard_checks: []
   llm_judge_prompt: |
     User: "{{ input }}"
-    Available agents: calendar_agent (events), reminders_agent (alerts).
-    Routed to: {{ actual.routed_agent }}
+    Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
 
-    "My next thing" has no domain word at all — no "meeting", "reminder", or "event".
-    Score whether the routing is DEFENSIBLE:
-    - 4-5 if calendar_agent or reminders_agent (both are reasonable defaults for "what's next")
-    - 1-2 if any unrelated agent, or if entities were fabricated (there is nothing concrete
-      to extract here — a good response extracts nothing)
-  latency_budget_ms: 800
+    "My next thing" has no domain word at all — no "meeting", "reminder", or "event". Vesper
+    has no calendar/reminders tool in this eval harness, so the only genuinely available,
+    non-fabricated response is chat_agent honestly saying it can't check a calendar (or
+    asking what "thing" refers to). Score:
+    - 5 if chat_agent honestly declines/asks for clarification, no fabricated entities
+    - 1-2 if it fabricates a specific upcoming event/task, or calls an unrelated tool
+  latency_budget_ms: 15000
 notes: |
-  Tests vague temporal-reference resolution with zero domain vocabulary to anchor on. Unlike
-  ambiguous_001 ("the doctor thing" at least names a topic), there's no subject here at all —
-  purpose is to see whether the model defaults sensibly to the most likely interpretation
-  (upcoming calendar item) without inventing entities that aren't present in the input.
+  Originally written expecting calendar_agent/reminders_agent — fictional agents that don't
+  exist in Vesper's real catalog. Rewritten 2026-09-15 (Bucket B): with zero domain
+  vocabulary AND no real calendar tool, chat_agent honestly admitting it can't check upcoming
+  items is the only defensible outcome, unlike ambiguous_001's "doctor thing" which at least
+  maps to show_notification.

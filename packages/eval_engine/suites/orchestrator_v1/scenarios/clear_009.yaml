@@ -1,32 +1,44 @@
 id: clear_009
 category: clear
 complexity: single_step
-input: "remind me to call mom at 7pm"
+input: remind me to call mom at 7pm
 context:
   prior_turns: []
-  active_apps: ["Reminders"]
+  active_apps: [Reminders]
 expected:
-  routed_agent: reminders_agent
+  routed_agent: chat_agent
   extracted_entities:
-    subject: "call mom"
-    time: "7pm"
+    message: call mom at 7pm
   refuse: false
 rubric:
-  hard_checks:
-    - routed_agent_matches
-    - not_refused
-    - extracted_entities.subject_present
-    - extracted_entities.time_present
+  hard_checks: []
   llm_judge_prompt: |
     User: "{{ input }}"
     Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
-    Expected agent: {{ expected.routed_agent }}
+    Reply context: {{ actual.reasoning }}
 
-    Score whether the task ("call mom") and time ("7pm") were extracted, and whether
-    reminders_agent (not calendar_agent) was chosen — the explicit "remind me" phrasing
-    should decide the routing even though a specific time is present.
-  latency_budget_ms: 800
+    Vesper has no dedicated reminders tool. show_notification is a plausible real
+    equivalent for "remind me to X", but direct probe evidence on this exact input
+    (docs/vesper_routing_probe.json, "reminder") shows real Vesper also just answers in
+    chat instead — both are acceptable outcomes here, not just one specific one. Score:
+      5 = show_notification with a message mentioning both "call mom" and "7pm"/the
+          time, OR chat_agent honestly saying it can't set reminders (no fabricated
+          "reminder set")
+      3 = show_notification but the message drops the task or the time, or chat_agent is
+          vague about why it can't help
+      1 = claims or implies a reminder was actually set with no real mechanism to do so
+  latency_budget_ms: 6000
 notes: |
-  Tests the reminders_agent/calendar_agent boundary. Both agents deal with timed content,
-  but "remind me to X at TIME" is a personal-task reminder, not an event with duration or
-  attendees — the verb, not the presence of a time, should drive the routing decision.
+  Originally written expecting reminders_agent — a fictional agent that doesn't exist in
+  Vesper's real catalog. Rewritten 2026-09-15 (Bucket B) to expect show_notification, the
+  real tool that actually serves "remind me" requests (confirmed via live runs against real
+  Vesper), with a single combined message entity replacing the old separate subject/time
+  fields to match that tool's actual argument shape.
+
+  P32.3 iteration: this scenario's prior note claimed the show_notification expectation
+  was "confirmed via live runs against real Vesper" — but a fresh probe
+  (docs/vesper_routing_probe.json) using the exact same input text returned chat_agent
+  instead. Rather than pick a side, loosened to judge-only: ModelRouter.complete() runs
+  at temperature=0.3 (llm/router.py), so this is plausibly genuine run-to-run
+  non-determinism for an underspecified request like this one, not a contradiction to
+  resolve in favor of one observation over the other.

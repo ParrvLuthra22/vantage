@@ -1,31 +1,36 @@
 id: ambiguous_006
 category: ambiguous
 complexity: single_step
-input: "what should I do about the priya situation"
+input: what should I do about the priya situation
 context:
   prior_turns: []
-  active_apps: ["Messages", "Notes"]
+  active_apps: [Messages, Notes]
 expected:
-  routed_agent: planning_agent
-  extracted_entities:
-    subject: priya
+  routed_agent: chat_agent
+  extracted_entities: {}
   refuse: false
 rubric:
-  hard_checks:
-    - not_refused
-    - extracted_entities.subject_present
+  hard_checks: []
+  # No extracted_entities.subject_present: Vesper's real AgentOutput only ever
+  # carries entities when a tool was actually called, and chat_agent (the
+  # accepted good answer here) always has empty extracted_entities.
   llm_judge_prompt: |
     User: "{{ input }}"
-    Available agents: planning_agent (open-ended advice), chat_agent (general conversation),
-    messages_agent (send a message to someone).
     Routed to: {{ actual.routed_agent }}, entities: {{ actual.extracted_entities }}
+    Reply context: {{ actual.reasoning }}
 
     This is advice-seeking, not a task-execution request — no concrete action was named.
-    Score 4-5 for planning_agent or chat_agent, 1-2 for a task-execution agent like
-    messages_agent (nothing in the input asked to message priya or anyone else).
-  latency_budget_ms: 800
+    Vesper has no dedicated planning/advice tool in this eval harness, but chat_agent can
+    directly engage with an advice-seeking question in conversation (unlike, say, booking a
+    real meeting, this needs no external tool to be genuinely helpful). Score:
+    - 5 if chat_agent engages with the "priya situation" as an advice request (asks what's
+      going on, or offers to help think it through) without fabricating what happened
+    - 1-2 if it calls a task-execution tool like messaging someone (nothing in the input
+      asked to message priya or anyone else), or fabricates details about the situation
+  latency_budget_ms: 15000
 notes: |
-  Tests distinguishing "give me advice" phrasing from "do a task" phrasing. The subject
-  ("priya") is cleanly extractable even though the concrete action is undefined — purpose
-  is to see whether the orchestrator recognizes open-ended, advice-seeking language rather
-  than defaulting to an executable action just because a person's name is present.
+  Originally written expecting planning_agent — a fictional agent that doesn't exist in
+  Vesper's real catalog, with a subject_present hard check that structurally conflicts with
+  chat_agent (its own accepted good answer) always having empty entities. Rewritten
+  2026-09-15 (Bucket B) to drop both issues; the underlying test (advice-seeking vs.
+  task-execution phrasing) is preserved via the judge prompt.

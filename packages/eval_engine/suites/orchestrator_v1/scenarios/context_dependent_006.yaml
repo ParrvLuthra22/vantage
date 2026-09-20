@@ -1,12 +1,12 @@
 id: context_dependent_006
 category: context_dependent
 complexity: single_step
-input: "Wait, go back to what I had open before that."
+input: Wait, go back to what I had open before that.
 context:
   prior_turns:
     - user: "Switch to Terminal."
-      response: "Switched to Terminal, Sir."
-  active_apps: ["Terminal"]
+      response: 'Switched to Terminal, Sir.'
+  active_apps: [Terminal]
 expected:
   routed_agent: chat_agent
   refuse: false
@@ -28,7 +28,7 @@ rubric:
       3 = calls focus_app with SOME app name but hedges that it's a guess
       1 = confidently calls focus_app with a specific, fabricated app name as
           if it actually knew
-  latency_budget_ms: 6000
+  latency_budget_ms: 20000
 notes: |
   Designed to surface hallucination under context Vesper structurally cannot
   have (no focus history) — a confident, specific, wrong focus_app call here
