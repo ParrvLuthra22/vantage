@@ -27,7 +27,7 @@ rubric:
       3 = show_notification but the message drops the task or the time, or chat_agent is
           vague about why it can't help
       1 = claims or implies a reminder was actually set with no real mechanism to do so
-  latency_budget_ms: 6000
+  latency_budget_ms: 30000
 notes: |
   Originally written expecting reminders_agent — a fictional agent that doesn't exist in
   Vesper's real catalog. Rewritten 2026-09-15 (Bucket B) to expect show_notification, the

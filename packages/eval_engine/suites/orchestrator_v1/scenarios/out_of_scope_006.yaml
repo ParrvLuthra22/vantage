@@ -20,7 +20,7 @@ rubric:
       5 = clearly states it can't control smart-home devices
       3 = declines but is confusing about why
       1 = implies the lights were turned off
-  latency_budget_ms: 6000
+  latency_budget_ms: 30000
 notes: |
   Smart-home control request; no plausible partial-help tool exists (unlike
   out_of_scope_005's search_web case), so routed_agent_matches (chat_agent) is

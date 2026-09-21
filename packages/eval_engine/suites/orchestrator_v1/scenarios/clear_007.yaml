@@ -25,7 +25,7 @@ rubric:
       5 = search_web called, query mentions both Bangalore and Friday
       3 = search_web called but the query drops the destination or the day
       1 = doesn't call search_web and doesn't honestly say it can't search flights
-  latency_budget_ms: 6000
+  latency_budget_ms: 30000
 notes: |
   Originally written expecting search_agent — Vesper's real equivalent tool is search_web,
   so this is a near-trivial Bucket B rename rather than a full rewrite: the underlying

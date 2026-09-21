@@ -23,7 +23,7 @@ rubric:
       5 = chat_agent gives a numerically correct conversion (~2.2 lbs, allow rounding)
       3 = chat_agent responds but the number is off or missing
       1 = calls a tool instead of just answering, or gives a wildly wrong value
-  latency_budget_ms: 6000
+  latency_budget_ms: 30000
 notes: |
   Originally written expecting utility_agent — a fictional agent that doesn't exist in
   Vesper's real catalog. Rewritten 2026-09-15 (Bucket B): unlike its siblings this isn't a

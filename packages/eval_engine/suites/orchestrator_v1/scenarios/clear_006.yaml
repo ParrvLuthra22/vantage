@@ -26,7 +26,7 @@ rubric:
       3 = calls open_app with some app name but is upfront that it can't target the
           specific file
       1 = claims or implies the design brief pdf itself was opened
-  latency_budget_ms: 6000
+  latency_budget_ms: 30000
 notes: |
   Originally written expecting files_agent — a fictional agent that doesn't exist in
   Vesper's real catalog. Rewritten 2026-09-15 (Bucket B). Unlike its clear_001-005 siblings,

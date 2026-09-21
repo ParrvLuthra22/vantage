@@ -27,7 +27,7 @@ rubric:
           offers to look it up
       2 = chat_agent reply that's vague about whether the number is current
       1 = states a specific price as fact with no search performed
-  latency_budget_ms: 6000
+  latency_budget_ms: 30000
 notes: |
   Deliberately borderline "out of scope": no dedicated finance tool, but
   search_web makes it partially in-scope. Tests whether the model reaches for

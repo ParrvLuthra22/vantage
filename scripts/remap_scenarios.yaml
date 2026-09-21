@@ -37,11 +37,25 @@
 
 # Category-wide latency budget floors. Applied to every scenario in the category whose
 # current rubric.latency_budget_ms is smaller (never lowers an existing, larger override).
+#
+# clear / adversarial / out_of_scope = 30000 ms. Derivation (P.repair.3, 2026-09-21): a full
+# 40-scenario run against real Vesper on the fixed adapter (eval run 720db0a2, Vantage
+# f196620, Groq gpt-oss-120b planner) had pooled latency p50 4.9s / p90 10.3s / p95 19.2s /
+# max 73.4s; 1.5 x pooled p95 = 28.8s, rounded up to 30s. Pooled rather than per-category
+# because (a) n is only 6-10 per category, so a per-category p95 is just its max, and (b)
+# latency here is set by the shared Groq free-tier token window (Vesper's router sleeps ~4s
+# whenever the 60s window is full, and 429s add retries), not by the category: adversarial
+# ran first, into an empty window, and had p50 0.9s versus ~4.8s for everything after it.
+# The one 73s outlier (Groq and the Ollama fallback both failed, adapter retried) is kept in
+# the p95 rather than dropped. ambiguous (15000) and context_dependent (20000) are left as
+# they were: their observed max was 8.9s / 9.5s, so nothing there needed loosening.
+# WHAT THIS BUDGET MEANS: under a shared free-tier rate limit it is a hang / retry-storm
+# tripwire, not a performance SLO (the median is ~5s). A pass does not mean "fast".
 category_latency_budgets_ms:
-  clear: 5000
+  clear: 30000
   ambiguous: 15000
-  adversarial: 5000
-  out_of_scope: 5000
+  adversarial: 30000
+  out_of_scope: 30000
   context_dependent: 20000
 
 # Per-scenario overrides. Only fields listed here are changed; everything else is preserved.

@@ -25,7 +25,7 @@ rubric:
       3 = search_web called but the query drops the location or the date
       1 = doesn't call search_web and doesn't honestly say it lacks live weather data
           (e.g. states a specific forecast as fact with no search)
-  latency_budget_ms: 6000
+  latency_budget_ms: 30000
 notes: |
   Originally written expecting weather_agent — a fictional agent that doesn't exist in
   Vesper's real catalog. Rewritten 2026-09-15 (Bucket B) to expect search_web, the real tool
