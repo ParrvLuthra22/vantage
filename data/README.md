@@ -30,7 +30,12 @@ flood the dashboard with near-identical runs; pass `--persist` to override.
 The final report prints the numbers that matter, and they are not the line count:
 **unique prompts** is the effective dataset size (see *Duplicates* below).
 
-### Schema (`schema_version` 1)
+### Schema (`schema_version` 2)
+
+> **v1 lines are not usable as labels.** Until v2 the judge was shown only the
+> first tool the agent called and never the reply the user got (`reasoning` was
+> `None` on any non-aborted turn), so a v1 score can contradict the transcript.
+> Drop `schema_version` < 2 before training.
 
 | field | type | meaning |
 | --- | --- | --- |
@@ -44,7 +49,7 @@ The final report prints the numbers that matter, and they are not the line count
 | `raw_response` | string | Exactly what the judge returned (a JSON string) |
 | `parsed_score` | int/float | Score parsed from `raw_response`, always within 1–5 |
 | `parsed_reasoning` | string | Reasoning parsed from `raw_response` |
-| `actual_output` | object | `{routed_agent, extracted_entities}` — what the agent under test did |
+| `actual_output` | object | `{routed_agent, extracted_entities, tool_sequence, final_reply}` — what the agent under test did (v1 had only the first two) |
 | `expected` | object | The scenario's `expected` block |
 
 A training example is `system_prompt` + `input_prompt` → `raw_response`.

@@ -358,6 +358,7 @@ class VesperAdapter(AgentAdapter):
                     ),
                     trace_id=trace_id,
                     raw_output=str({"reply": result.text, "aborted": result.aborted})[:2000],
+                    final_reply=result.text or None,
                 )
 
             if tool_calls:
@@ -376,6 +377,11 @@ class VesperAdapter(AgentAdapter):
                 raw_output=str(
                     {"reply": result.text, "aborted": result.aborted, "tool_calls": tool_calls}
                 )[:2000],
+                # routed_agent/extracted_entities above describe only the FIRST
+                # tool call; these carry the whole turn (see AgentOutput).
+                tool_sequence=[c["name"] for c in tool_calls],
+                tool_calls=tool_calls,
+                final_reply=result.text or None,
             )
 
         # Unreachable: every branch above returns by the final attempt

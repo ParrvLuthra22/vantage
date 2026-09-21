@@ -141,6 +141,59 @@ def test_adapter_returns_planner_failure_after_exhausted_retries(monkeypatch):
     assert "router" in (out.reasoning or "").lower()
 
 
+def test_adapter_records_the_whole_turn_not_just_the_first_tool():
+    """routed_agent/extracted_entities describe only the first call; the rest
+    of the turn (and the reply) must survive for the judge and hard checks."""
+
+    async def _two_tools_then_reply(event_bus):
+        await event_bus.fire_tool_call("get_volume", {})
+        await event_bus.fire_tool_call("set_volume", {"level": 60})
+        return _FakePlannerResult(text="Volume increased to 60%, Sir.", aborted=False)
+
+    adapter = VesperAdapter()
+    _wire_fake_planner(adapter, [_two_tools_then_reply])
+
+    out = adapter.invoke("turn it up a bit more", {})
+
+    assert out.routed_agent == "get_volume", "stays the first tool, for hard_check back-compat"
+    assert out.extracted_entities == {}
+    assert out.tool_sequence == ["get_volume", "set_volume"]
+    assert out.tool_calls == [
+        {"name": "get_volume", "arguments": {}},
+        {"name": "set_volume", "arguments": {"level": 60}},
+    ]
+    assert out.final_reply == "Volume increased to 60%, Sir."
+
+
+def test_adapter_records_a_text_only_reply():
+    """No tool call -> chat_agent, but the reply is what a judge needs to see
+    (reasoning is deliberately still None on a non-aborted turn)."""
+
+    async def _text_only(event_bus):
+        return _FakePlannerResult(text="Sir, I can't send text messages.", aborted=False)
+
+    adapter = VesperAdapter()
+    _wire_fake_planner(adapter, [_text_only])
+
+    out = adapter.invoke("text nisha", {})
+
+    assert out.routed_agent == "chat_agent"
+    assert out.tool_sequence == [] and out.tool_calls == []
+    assert out.final_reply == "Sir, I can't send text messages."
+    assert out.reasoning is None
+
+
+def test_adapter_reply_is_none_when_the_agent_said_nothing():
+    async def _silent(event_bus):
+        await event_bus.fire_tool_call("open_app", {"name": "Notes"})
+        return _FakePlannerResult(text="", aborted=False)
+
+    adapter = VesperAdapter()
+    _wire_fake_planner(adapter, [_silent])
+
+    assert adapter.invoke("open notes", {}).final_reply is None
+
+
 def test_adapter_returns_adapter_error_on_exception(monkeypatch):
     """A genuine crash in this adapter's own code (not Vesper's LLM) must
     stay distinctly ADAPTER_ERROR, never PLANNER_FAILURE — and, being

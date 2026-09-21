@@ -37,7 +37,11 @@ logger = logging.getLogger(__name__)
 #: Bump when the JSONL trace entry's shape changes incompatibly, so a training
 #: pipeline reading a file accumulated across many sessions can tell which
 #: layout each line uses.
-TRACE_SCHEMA_VERSION = 1
+#: v2: the judge prompt now ends with the full tool sequence + the reply the
+#: user got (see TRAJECTORY_BLOCK), and `actual_output` carries both. v1 labels
+#: were made WITHOUT seeing the reply or any tool after the first, so they must
+#: not be mixed into training data with v2.
+TRACE_SCHEMA_VERSION = 2
 
 # One preset per OpenAI-compatible provider: which model to default to, where
 # to send requests, which env var holds the key, and per-1M-token pricing (both
@@ -110,6 +114,30 @@ Score guide:
 
 Output ONLY the JSON object. No prose before or after.
 """
+
+#: Bounds on what the judge is shown, so one runaway value (a pasted AppleScript
+#: in a reply or a tool argument) can't dominate the prompt or the judge's budget.
+MAX_REPLY_CHARS = 1500
+MAX_TOOL_CALL_CHARS = 300
+
+#: Appended to EVERY scenario's rendered judge prompt (see _render_prompt).
+TRAJECTORY_BLOCK = """\
+--- Complete observed behavior (authoritative) ---
+Any "routed to" line above shows only the FIRST tool called; this is the whole turn.
+Tool calls (in order): {{ actual.tool_calls_rendered | join(" → ")
+    if actual.tool_calls_rendered else "(no tool calls)" }}
+Reply to user: {{ actual.final_reply if actual.final_reply else "(no reply text)" }}
+"""
+
+
+def _truncate(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit] + " …[truncated]"
+
+
+def _render_tool_call(call: dict) -> str:
+    """`set_volume(level=60)`, `list_apps()` — name plus its arguments."""
+    inner = ", ".join(f"{k}={v!r}" for k, v in (call.get("arguments") or {}).items())
+    return _truncate(f"{call.get('name', '?')}({inner})", MAX_TOOL_CALL_CHARS)
 
 
 class LLMJudgeScorer(Scorer):
@@ -224,24 +252,40 @@ class LLMJudgeScorer(Scorer):
                 self.traces_skipped += 1
 
     def _render_prompt(self, scenario: Scenario, output: AgentOutput) -> str:
+        actual = self._actual_context(output)
         # scenario.rubric.llm_judge_prompt is a Jinja2 template
-        tmpl = Template(scenario.rubric.llm_judge_prompt or "")
-        return tmpl.render(
+        body = Template(scenario.rubric.llm_judge_prompt or "").render(
             input=scenario.input,
             context=scenario.context,
             expected=scenario.expected,
-            actual={
-                "routed_agent": output.routed_agent,
-                "extracted_entities": output.extracted_entities,
-                "reasoning": output.reasoning,
-                # AgentOutput.routed_agent only ever reports the FIRST tool an
-                # adapter observed (see vantage_eval/agents/vesper.py) — a
-                # multi_step scenario's judge prompt needs raw_output to see
-                # what happened after that, since reasoning is normally None
-                # (only set on an aborted turn).
-                "raw_output": output.raw_output,
-            },
+            actual=actual,
         )
+        # Appended to every scenario's prompt rather than left to each scenario's
+        # own template: routed_agent/extracted_entities describe only the FIRST
+        # tool call, and `reasoning` is None unless the turn aborted, so a
+        # template that only references those never shows the judge the rest of
+        # the turn or the reply the user actually got.
+        trajectory = Template(TRAJECTORY_BLOCK).render(actual=actual)
+        return f"{body.rstrip()}\n\n{trajectory}"
+
+    @staticmethod
+    def _actual_context(output: AgentOutput) -> dict:
+        """What a scenario's Jinja template can reference as `actual.*`."""
+        return {
+            "routed_agent": output.routed_agent,
+            "extracted_entities": output.extracted_entities,
+            "reasoning": output.reasoning,
+            "raw_output": output.raw_output,
+            "tool_sequence": list(output.tool_sequence),
+            "tool_calls": [dict(c) for c in output.tool_calls],
+            # Names alone when an adapter didn't fill in arguments.
+            "tool_calls_rendered": (
+                [_render_tool_call(c) for c in output.tool_calls] or list(output.tool_sequence)
+            ),
+            "final_reply": (
+                _truncate(output.final_reply, MAX_REPLY_CHARS) if output.final_reply else None
+            ),
+        }
 
     @staticmethod
     def _prepare_trace_log(path: Path) -> None:
@@ -298,6 +342,8 @@ class LLMJudgeScorer(Scorer):
             "actual_output": {
                 "routed_agent": output.routed_agent,
                 "extracted_entities": output.extracted_entities,
+                "tool_sequence": output.tool_sequence,
+                "final_reply": output.final_reply,
             },
             "expected": scenario.expected,
         }

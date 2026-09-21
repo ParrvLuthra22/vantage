@@ -87,7 +87,7 @@ def test_clean_judgment_is_logged_with_the_full_schema(tmp_path):
     (line,) = _lines(log)
     entry = json.loads(line)
     assert REQUIRED_FIELDS <= entry.keys()
-    assert entry["schema_version"] == TRACE_SCHEMA_VERSION
+    assert entry["schema_version"] == TRACE_SCHEMA_VERSION == 2  # v1 labels were reply-blind
     assert entry["scenario_id"] == "t1"
     assert entry["category"] == "clear"
     assert entry["judge_model"] == scorer.model
@@ -95,10 +95,14 @@ def test_clean_judgment_is_logged_with_the_full_schema(tmp_path):
     assert isinstance(entry["parsed_score"], int)
     assert entry["parsed_reasoning"] == "right tool"
     assert entry["raw_response"] == '{"reasoning": "right tool", "score": 5}'
-    assert entry["input_prompt"] == "Judge what's the weather routed to search_web"
+    # The scenario's own rendered prompt, then the standard whole-turn block.
+    assert entry["input_prompt"].startswith("Judge what's the weather routed to search_web\n\n")
+    assert "Complete observed behavior" in entry["input_prompt"]
     assert entry["actual_output"] == {
         "routed_agent": "search_web",
         "extracted_entities": {"query": "weather"},
+        "tool_sequence": [],
+        "final_reply": None,
     }
     assert entry["expected"] == {"routed_agent": "search_web"}
     # The score guide lives in the system prompt — the example isn't reproducible without it.

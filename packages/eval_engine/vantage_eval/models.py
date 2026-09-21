@@ -74,6 +74,22 @@ class AgentOutput(BaseModel):
     trace_id: Optional[UUID] = None
     raw_output: Optional[str] = None
 
+    tool_sequence: list[str] = Field(default_factory=list)
+    """Names of every tool the agent invoked this turn, in call order; empty when
+    it answered in text alone. `routed_agent` stays just the FIRST of these (or a
+    sentinel), for rubric hard_checks that reference it — anything about what
+    happened AFTER the first call has to read this instead."""
+
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    """Same order as `tool_sequence`, each entry `{"name": ..., "arguments": {...}}`.
+    Carries the arguments a name alone can't (e.g. set_volume's level), which a
+    judge needs to grade "did it pick a sensible value"."""
+
+    final_reply: Optional[str] = None
+    """The agent's user-facing reply text, if any. Unlike `reasoning` (only set
+    on an aborted turn, so None for almost every run), this is populated whenever
+    the agent said something — so a judge can see what the user was actually told."""
+
 
 class DeterministicResult(BaseModel):
     check_name: str

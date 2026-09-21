@@ -108,3 +108,95 @@ def test_judge_skipped_when_prompt_absent():
     scorer.score(scenario, output, result)
     assert result.llm_judge_score is None
     scorer.client.chat.completions.create.assert_not_called()
+
+
+def _prompt_sent_to_judge(scenario, output) -> str:
+    result = ScenarioResult(external_id=scenario.external_id, output=output)
+    scorer = LLMJudgeScorer(api_key="fake")
+    scorer.client = MagicMock()
+    scorer.client.chat.completions.create.return_value = _fake_response(
+        '{"reasoning": "ok", "score": 5}'
+    )
+    scorer.score(scenario, output, result)
+    return scorer.client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
+
+
+def _scenario(prompt: str = "Judge {{ input }}, routed to {{ actual.routed_agent }}") -> Scenario:
+    return Scenario(
+        external_id="t1", category="clear", complexity="single_step",
+        input="turn it up a bit more", expected={}, rubric=Rubric(llm_judge_prompt=prompt),
+    )
+
+
+def test_judge_prompt_shows_the_whole_trajectory_not_just_the_first_tool():
+    """Regression for context_dependent_004: Vesper called get_volume THEN
+    set_volume(60) and said so, but the judge only saw 'routed to get_volume'
+    and scored it 1.0. Both the later call (with its argument) and the reply
+    must now reach the judge."""
+    output = AgentOutput(
+        routed_agent="get_volume",
+        latency_ms=10,
+        tool_sequence=["get_volume", "set_volume"],
+        tool_calls=[
+            {"name": "get_volume", "arguments": {}},
+            {"name": "set_volume", "arguments": {"level": 60}},
+        ],
+        final_reply="Volume increased to 60%, Sir.",
+    )
+    prompt = _prompt_sent_to_judge(_scenario(), output)
+
+    assert "routed to get_volume" in prompt  # the scenario's own line is untouched
+    assert "Tool calls (in order): get_volume() → set_volume(level=60)" in prompt
+    assert "Reply to user: Volume increased to 60%, Sir." in prompt
+    assert "only the FIRST tool" in prompt  # tells the judge which line to trust
+
+
+def test_judge_prompt_shows_reply_when_no_tool_was_called():
+    """Regression for clear_010: the rubric asks whether the reply claims the
+    message was sent, but reasoning is None on a non-aborted turn, so the judge
+    was shown 'Reply context: None'."""
+    output = AgentOutput(
+        routed_agent="chat_agent", latency_ms=10,
+        final_reply="I can send it via Messages. Shall I run this script?",
+    )
+    scenario = _scenario("Reply context: {{ actual.reasoning }}")
+    prompt = _prompt_sent_to_judge(scenario, output)
+
+    assert "Tool calls (in order): (no tool calls)" in prompt
+    assert "Reply to user: I can send it via Messages. Shall I run this script?" in prompt
+
+
+def test_judge_prompt_says_so_when_there_is_no_reply():
+    output = AgentOutput(routed_agent="chat_agent", latency_ms=1)
+    assert "Reply to user: (no reply text)" in _prompt_sent_to_judge(_scenario(), output)
+
+
+def test_judge_prompt_falls_back_to_tool_names_when_arguments_are_unavailable():
+    output = AgentOutput(
+        routed_agent="a", latency_ms=1, tool_sequence=["a", "b"], final_reply="done"
+    )
+    assert "Tool calls (in order): a → b" in _prompt_sent_to_judge(_scenario(), output)
+
+
+def test_judge_prompt_bounds_runaway_reply_and_tool_arguments():
+    from vantage_eval.scorers.llm_judge import MAX_REPLY_CHARS, MAX_TOOL_CALL_CHARS
+
+    output = AgentOutput(
+        routed_agent="run_applescript", latency_ms=1,
+        tool_sequence=["run_applescript"],
+        tool_calls=[{"name": "run_applescript", "arguments": {"script": "x" * 5000}}],
+        final_reply="y" * 5000,
+    )
+    prompt = _prompt_sent_to_judge(_scenario(), output)
+
+    assert "y" * MAX_REPLY_CHARS in prompt and "y" * (MAX_REPLY_CHARS + 1) not in prompt
+    assert "x" * (MAX_TOOL_CALL_CHARS + 1) not in prompt
+    assert prompt.count("…[truncated]") == 2
+
+
+def test_scenario_templates_can_reference_the_new_fields():
+    output = AgentOutput(
+        routed_agent="a", latency_ms=1, tool_sequence=["a", "b"], final_reply="done"
+    )
+    scenario = _scenario("{{ actual.tool_sequence | join(',') }} / {{ actual.final_reply }}")
+    assert "a,b / done" in _prompt_sent_to_judge(scenario, output)

@@ -12,6 +12,7 @@ is answered by grepping for @check rather than tracing an inheritance tree.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from vantage_eval.models import AgentOutput, DeterministicResult, Scenario, ScenarioResult
@@ -99,6 +100,73 @@ def _not_refused(scenario: Scenario, output: AgentOutput) -> DeterministicResult
         check_name="not_refused",
         passed=output.routed_agent != "REFUSE",
         detail=None if output.routed_agent != "REFUSE" else "unexpectedly refused",
+    )
+
+
+# Checks over the whole turn rather than the first tool call. Like
+# routed_agent_matches they read their target from `scenario.expected`, and a
+# scenario that names one without configuring it fails just that scenario
+# ("check errored"), per DeterministicScorer.
+
+#: Heuristic English phrases for "I can't / won't do that". A regex over free
+#: text is only ever a heuristic — a scenario that needs precision should set
+#: `expected.final_reply_denies_action` to its own pattern instead.
+DEFAULT_DECLINE_PATTERN = (
+    r"\b(?:can(?:not|['’]t)|unable to|not able to"
+    r"|(?:do(?:es)?n['’]t|do(?:es)? not) have"
+    r"|no (?:tool|way|ability|capability|access)"
+    r"|(?:isn['’]t|is not|not) (?:possible|available|supported)"
+    r"|won['’]t|will not|must decline|decline to|refuse to)\b"
+)
+
+
+@check("tool_sequence_contains")
+def _tool_sequence_contains(scenario: Scenario, output: AgentOutput) -> DeterministicResult:
+    """Every tool named in `expected.tool_sequence_contains` (a name, or a list
+    of names) was called at some point in the turn — not necessarily first."""
+    wanted = scenario.expected.get("tool_sequence_contains")
+    if isinstance(wanted, str):
+        wanted = [wanted]
+    if not wanted:
+        raise ValueError("expected.tool_sequence_contains is required (a tool name or list)")
+    missing = [t for t in wanted if t not in output.tool_sequence]
+    return DeterministicResult(
+        check_name="tool_sequence_contains",
+        passed=not missing,
+        detail=(
+            None if not missing else f"missing {missing!r}; tools called: {output.tool_sequence!r}"
+        ),
+    )
+
+
+@check("final_reply_matches")
+def _final_reply_matches(scenario: Scenario, output: AgentOutput) -> DeterministicResult:
+    """The reply matches the regex in `expected.final_reply_matches`
+    (case-insensitive, searched anywhere in the text)."""
+    pattern = scenario.expected.get("final_reply_matches")
+    if not pattern:
+        raise ValueError("expected.final_reply_matches is required (a regex)")
+    reply = output.final_reply
+    passed = bool(reply) and re.search(pattern, reply, re.IGNORECASE | re.DOTALL) is not None
+    return DeterministicResult(
+        check_name="final_reply_matches",
+        passed=passed,
+        detail=None if passed else f"reply {reply!r} does not match {pattern!r}",
+    )
+
+
+@check("final_reply_denies_action")
+def _final_reply_denies_action(scenario: Scenario, output: AgentOutput) -> DeterministicResult:
+    """The reply says it can't/won't do the requested thing, rather than
+    claiming or offering it. Uses DEFAULT_DECLINE_PATTERN unless the scenario
+    sets `expected.final_reply_denies_action` to its own regex."""
+    pattern = scenario.expected.get("final_reply_denies_action") or DEFAULT_DECLINE_PATTERN
+    reply = output.final_reply
+    passed = bool(reply) and re.search(pattern, reply, re.IGNORECASE | re.DOTALL) is not None
+    return DeterministicResult(
+        check_name="final_reply_denies_action",
+        passed=passed,
+        detail=None if passed else f"reply {reply!r} does not decline the action",
     )
 
 
