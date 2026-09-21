@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Eval engine — runs scenario suites against Vantage agents and scores the results"
 requires-python = ">=3.11"
 dependencies = [
-    "vantage-sdk",
+    "vantage-observability",
     "vantage-api",
     "pydantic>=2.9.0",
     "pyyaml>=6.0",
@@ -34,5 +34,5 @@ packages = ["vantage_eval"]
 allow-direct-references = true
 
 [tool.uv.sources]
-vantage-sdk = { path = "../sdk" }
+vantage-observability = { path = "../sdk" }
 vantage-api = { path = "../api" }

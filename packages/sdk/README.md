@@ -1,8 +1,8 @@
-# vantage-sdk
+# vantage-observability
 
 Instrumentation for LLM agent applications.
 
-[![PyPI](https://img.shields.io/pypi/v/vantage-sdk.svg)](https://pypi.org/project/vantage-sdk/)
+[![PyPI](https://img.shields.io/pypi/v/vantage-observability.svg)](https://pypi.org/project/vantage-observability/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/ParrvLuthra22/vantage/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 
@@ -13,9 +13,10 @@ and get a trace tree with per-call token and cost attribution in your own Postgr
 ## Install
 
 ```bash
-pip install vantage-sdk
+pip install vantage-observability
 ```
 
+The distribution is `vantage-observability`; you import it as `vantage`.
 Requires Python 3.10+.
 
 ## Quickstart

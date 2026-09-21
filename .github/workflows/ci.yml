@@ -58,15 +58,17 @@ jobs:
 
           # eval_engine's own metadata can't be resolved on a CI runner: it pins
           # `vesper @ git+...` (the agent under test — not needed here, its tests
-          # are marked `integration`) and a bare `vantage-sdk`, which on PyPI is an
-          # unrelated project. So install it without dependency resolution and pull
-          # its remaining runtime deps straight from its pyproject, keeping that
-          # file the single source of truth.
+          # are marked `integration`) and depends on vantage-observability and
+          # vantage-api, which are installed above from this checkout, not PyPI.
+          # So install it without dependency resolution and pull its remaining
+          # runtime deps straight from its pyproject, keeping that file the single
+          # source of truth.
           uv pip install --no-deps -e ./packages/eval_engine
           .venv/bin/python - <<'PY' | uv pip install -r -
           import tomllib
 
-          SKIP = ("vantage-sdk", "vantage-api", "vesper")  # local editable installs / integration-only
+          # Local editable installs (above) and the integration-only agent.
+          SKIP = ("vantage-observability", "vantage-api", "vesper")
           with open("packages/eval_engine/pyproject.toml", "rb") as fh:
               deps = tomllib.load(fh)["project"]["dependencies"]
           print("\n".join(d for d in deps if not d.startswith(SKIP)))
@@ -164,5 +166,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: vantage-sdk-dist
+          name: vantage-observability-dist
           path: packages/sdk/dist/*

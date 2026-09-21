@@ -1,5 +1,8 @@
 [project]
-name = "vantage-sdk"
+# The distribution name (what you `pip install`). The import name is `vantage`
+# (see [tool.hatch.build.targets.wheel] below); the two differ on purpose, since
+# the obvious PyPI names for this project belong to other people.
+name = "vantage-observability"
 version = "0.1.0"
 description = "Instrumentation SDK for the Vantage agent observability platform"
 readme = "README.md"
