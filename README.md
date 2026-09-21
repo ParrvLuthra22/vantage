@@ -2,6 +2,7 @@
 
 **Self-hosted evaluation and observability for LLM agents.**
 
+[![CI](https://github.com/ParrvLuthra22/vantage/actions/workflows/ci.yml/badge.svg)](https://github.com/ParrvLuthra22/vantage/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/vantage-sdk.svg)](https://pypi.org/project/vantage-sdk/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
