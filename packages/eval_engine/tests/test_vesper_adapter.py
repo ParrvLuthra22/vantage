@@ -15,7 +15,6 @@ attempt's fake Planner can push a fake `ToolCallStartedEvent` through) to
 drive `VesperAdapter._invoke_async`'s real retry loop.
 """
 import pytest
-
 from vantage_eval.agents.vesper import VesperAdapter
 
 
@@ -170,7 +169,9 @@ def test_direct_handler_tools_are_neutralized():
     adapter._ensure_ready()
 
     registry = get_registry()
-    direct_handler_tools = [t for t in registry.list_all(enabled_only=False) if t.handler is not None]
+    direct_handler_tools = [
+        t for t in registry.list_all(enabled_only=False) if t.handler is not None
+    ]
     assert direct_handler_tools, "expected at least one direct-handler tool to check against"
 
     for tool_spec in direct_handler_tools:

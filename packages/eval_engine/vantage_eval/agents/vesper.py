@@ -143,7 +143,7 @@ class VesperAdapter(AgentAdapter):
         from config.settings import load_config_dict
         from guardian.gate import Guardian, Verdict, VerdictType
         from llm.router import ModelRouter
-        from orchestrator.planner import Planner  # noqa: F401 side effect: imports tools.*, see below
+        from orchestrator.planner import Planner
         from schemas.events import ActionRequestEvent, ActionResultEvent, ToolCallStartedEvent
         from tasks.queue import TaskQueue
         from tools.registry import get_registry
@@ -166,7 +166,9 @@ class VesperAdapter(AgentAdapter):
         guardian = Guardian(event_bus=event_bus)
 
         async def _auto_allow_check(tool_spec: Any, arguments: dict, context: Any = None) -> Any:
-            return Verdict(VerdictType.ALLOW, reason="vantage-eval: guardian bypassed, execution mocked")
+            return Verdict(
+                VerdictType.ALLOW, reason="vantage-eval: guardian bypassed, execution mocked"
+            )
 
         # Instance-attribute assignment shadows the bound method without
         # touching the Guardian class — every other Guardian in this process

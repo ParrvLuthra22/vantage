@@ -24,8 +24,8 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
 from vantage_api.models import EvalResult, EvalRun, EvalScenario, EvalSuite
+
 from vantage_eval.loader import Suite
 from vantage_eval.models import Scenario, SuiteRun
 

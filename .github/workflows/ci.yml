@@ -10,9 +10,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -50,9 +54,27 @@ jobs:
 
       - name: Install packages and dev tooling
         run: |
-          uv pip install -e ./packages/api
-          uv pip install -e ./packages/sdk
-          uv pip install pytest pytest-asyncio httpx ruff
+          uv pip install -e ./packages/api -e ./packages/sdk
+
+          # eval_engine's own metadata can't be resolved on a CI runner: it pins
+          # `vesper @ git+...` (the agent under test — not needed here, its tests
+          # are marked `integration`) and a bare `vantage-sdk`, which on PyPI is an
+          # unrelated project. So install it without dependency resolution and pull
+          # its remaining runtime deps straight from its pyproject, keeping that
+          # file the single source of truth.
+          uv pip install --no-deps -e ./packages/eval_engine
+          .venv/bin/python - <<'PY' | uv pip install -r -
+          import tomllib
+
+          SKIP = ("vantage-sdk", "vantage-api", "vesper")  # local editable installs / integration-only
+          with open("packages/eval_engine/pyproject.toml", "rb") as fh:
+              deps = tomllib.load(fh)["project"]["dependencies"]
+          print("\n".join(d for d in deps if not d.startswith(SKIP)))
+          PY
+
+          # pytest, pytest-asyncio, httpx, ruff, ruamel.yaml — versions live in the
+          # root pyproject's [dependency-groups].dev.
+          uv pip install --group dev
 
       - name: Lint
         run: |
@@ -68,10 +90,12 @@ jobs:
           alembic current
         working-directory: packages/api
 
+      # sdk + api + eval_engine (see testpaths in the root pyproject). Tests that
+      # need Vesper or an LLM provider are marked `integration` and stay local.
       - name: Test
         run: |
           source .venv/bin/activate
-          pytest -q
+          pytest -q -m "not integration"
 
       - name: End-to-end smoke
         run: |
@@ -85,8 +109,43 @@ jobs:
           python examples/vesper_integration/main.py
           bash scripts/verify_week1.sh
 
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: packages/dashboard
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          # lib/api/client.ts throws at import time when these are unset, and
+          # `next build` imports it. Nothing calls the API during the build.
+          VANTAGE_API_URL: http://localhost:8000
+          VANTAGE_API_KEY: ci-build-placeholder
+
   build-sdk:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 

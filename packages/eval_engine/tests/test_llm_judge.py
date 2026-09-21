@@ -2,7 +2,6 @@ from unittest.mock import MagicMock
 
 import httpx
 from openai import APIStatusError
-
 from vantage_eval.models import AgentOutput, Rubric, Scenario, ScenarioResult
 from vantage_eval.scorers.llm_judge import SYSTEM_PROMPT, LLMJudgeScorer
 

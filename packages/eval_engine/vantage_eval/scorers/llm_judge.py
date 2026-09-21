@@ -123,7 +123,9 @@ class LLMJudgeScorer(Scorer):
         trace_log_path: Optional[Path] = None,
     ) -> None:
         if provider not in PROVIDER_PRESETS:
-            raise ValueError(f"Unknown judge provider {provider!r}; must be one of {list(PROVIDER_PRESETS)}")
+            raise ValueError(
+                f"Unknown judge provider {provider!r}; must be one of {list(PROVIDER_PRESETS)}"
+            )
         preset = PROVIDER_PRESETS[provider]
 
         self.provider = provider

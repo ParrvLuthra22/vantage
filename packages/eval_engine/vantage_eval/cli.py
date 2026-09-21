@@ -14,6 +14,7 @@ from rich.table import Table
 from vantage_eval import persistence
 from vantage_eval.agents.mock import MockAdapter
 from vantage_eval.loader import load_suite
+from vantage_eval.models import SuiteRun
 from vantage_eval.regression.detector import detect_regressions
 from vantage_eval.runner import run_suite
 from vantage_eval.scorers.llm_judge import LLMJudgeScorer
@@ -238,12 +239,11 @@ class _CompareLoadError(Exception):
     """A run/baseline argument was malformed or DB access was needed but unavailable."""
 
 
-async def _load_run_arg(token: str | None, suite_name: str) -> "SuiteRun | None":
+async def _load_run_arg(token: str | None, suite_name: str) -> SuiteRun | None:
     """Resolve one `compare` argument (a UUID, a JSON file path, or None
     for 'the suite's marked baseline') into a SuiteRun, or None if not found."""
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    from vantage_eval.models import SuiteRun
     from vantage_eval.regression.loader import db_run_to_suite_run, load_baseline_run, load_run
 
     if token is not None and Path(token).is_file():
@@ -342,7 +342,9 @@ def _print_scorecard(run, console: Console):
     table.add_column(style="dim")
     table.add_column()
     table.add_row("Total scenarios", str(s.total_scenarios))
-    table.add_row("Known failing", f"[yellow]{s.known_failing}[/yellow]" if s.known_failing else "0")
+    table.add_row(
+        "Known failing", f"[yellow]{s.known_failing}[/yellow]" if s.known_failing else "0"
+    )
     table.add_row("Passed", f"[green]{s.passed}[/green]")
     table.add_row("Failed", f"[red]{s.failed}[/red]" if s.failed else "0")
     table.add_row("Effective pass rate", f"{s.pass_rate:.1%} ({s.passed}/{s.total})")
@@ -357,7 +359,8 @@ def _print_scorecard(run, console: Console):
         console.print("[bold red]Failed scenarios:[/bold red]")
         for r in run.results:
             if not r.known_failing and not r.passed:
-                console.print(f"  [red]✗[/red] {r.external_id}: {'; '.join(_failure_reasons(r)) or 'unknown'}")
+                reasons = "; ".join(_failure_reasons(r)) or "unknown"
+                console.print(f"  [red]✗[/red] {r.external_id}: {reasons}")
 
     if s.known_failing > 0:
         console.print()
@@ -365,7 +368,8 @@ def _print_scorecard(run, console: Console):
         for r in run.results:
             if r.known_failing:
                 status = "[green]now passing[/green]" if r.passed else "still failing"
-                console.print(f"  [yellow]⚠[/yellow] {r.external_id} ({status}): {'; '.join(_failure_reasons(r)) or 'n/a'}")
+                reasons = "; ".join(_failure_reasons(r)) or "n/a"
+                console.print(f"  [yellow]⚠[/yellow] {r.external_id} ({status}): {reasons}")
 
 
 def _failure_reasons(r) -> list[str]:
