@@ -89,3 +89,11 @@ Thumbs.db
 # Vesper's own local trace/audit output, written relative to CWD when
 # running evals against --adapter vesper
 packages/eval_engine/data/
+
+# LLM judge fine-tuning data (scripts/collect_judge_traces.py): large,
+# regenerable, not source. data/README.md documents it and IS tracked.
+data/judge_traces*.jsonl
+# The vantage SDK's local span fallback, written to ./data/traces/ when the
+# API is unreachable. Keeps turning up as stray untracked files now that
+# data/ holds something tracked.
+data/traces/

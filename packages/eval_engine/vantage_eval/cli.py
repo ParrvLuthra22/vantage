@@ -58,6 +58,21 @@ def eval():
     "e.g. for `vantage eval compare` in a CI job with no DB, see docs/vesper_routing_surface.md's "
     "eval-gate workflow)",
 )
+@click.option(
+    "--collect-judge-traces",
+    "collect_judge_traces",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,
+    help="Append every clean LLM judgment to this JSONL file as fine-tuning data "
+    "(schema: data/README.md). Failed/unparseable judge calls are skipped, not logged.",
+)
+@click.option(
+    "--no-persist",
+    is_flag=True,
+    help="Don't write this run to Postgres. For bulk collection runs (see "
+    "scripts/collect_judge_traces.py), which would otherwise add one near-duplicate "
+    "run per iteration to the dashboard's run list.",
+)
 def eval_run(
     suite_path: str,
     adapter: str,
@@ -67,9 +82,24 @@ def eval_run(
     min_llm_pass: float,
     mark_baseline: bool,
     output_path: str | None,
+    collect_judge_traces: str | None,
+    no_persist: bool,
 ):
     """Run an evaluation suite against an agent."""
     console = Console()
+
+    # Reject contradictory flags before any work happens: the first would
+    # silently produce an empty training file after a multi-hour run.
+    if collect_judge_traces and no_judge:
+        console.print(
+            "[red]--collect-judge-traces needs the judge: it logs judge calls, and "
+            "--no-judge makes none.[/red]"
+        )
+        raise SystemExit(2)
+    if mark_baseline and no_persist:
+        console.print("[red]--mark-baseline needs the run persisted; drop --no-persist.[/red]")
+        raise SystemExit(2)
+
     suite = load_suite(suite_path)
 
     if adapter == "mock":
@@ -88,7 +118,14 @@ def eval_run(
         console.print(f"[red]Unknown adapter: {adapter}[/red]")
         raise SystemExit(2)
 
-    judge = None if no_judge else LLMJudgeScorer(provider=judge_provider)
+    judge = (
+        None
+        if no_judge
+        else LLMJudgeScorer(
+            provider=judge_provider,
+            trace_log_path=Path(collect_judge_traces) if collect_judge_traces else None,
+        )
+    )
 
     agent_version = _current_git_sha()
 
@@ -112,12 +149,27 @@ def eval_run(
         Path(output_path).write_text(run.model_dump_json(indent=2))
         console.print(f"[dim]Wrote run JSON to {output_path}[/dim]")
 
-    run_id = asyncio.run(persistence.persist_run(suite, run, mark_baseline=mark_baseline))
-    if run_id is not None:
-        baseline_note = " [bold yellow](marked as baseline)[/bold yellow]" if mark_baseline else ""
-        console.print(f"[dim]Persisted as eval run {run_id}{baseline_note}[/dim]")
+    if no_persist:
+        run_id = None
+        console.print("[dim]--no-persist: not writing this run to Postgres[/dim]")
     else:
-        console.print("[dim]Could not persist this run to Postgres (see warnings above) — scorecard below is still accurate[/dim]")
+        run_id = asyncio.run(persistence.persist_run(suite, run, mark_baseline=mark_baseline))
+        if run_id is not None:
+            baseline_note = (
+                " [bold yellow](marked as baseline)[/bold yellow]" if mark_baseline else ""
+            )
+            console.print(f"[dim]Persisted as eval run {run_id}{baseline_note}[/dim]")
+        else:
+            console.print(
+                "[dim]Could not persist this run to Postgres (see warnings above) — "
+                "scorecard below is still accurate[/dim]"
+            )
+
+    if judge is not None and judge.trace_log_path is not None:
+        console.print(
+            f"[dim]Judge traces: {judge.traces_logged} logged, {judge.traces_skipped} skipped "
+            f"(failed/unparseable judge calls) -> {judge.trace_log_path}[/dim]"
+        )
 
     _print_scorecard(run, console)
 

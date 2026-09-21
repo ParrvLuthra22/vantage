@@ -20,7 +20,10 @@ Known biases (documented so we're honest about limitations):
 from __future__ import annotations
 
 import json
+import logging
 import os
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from jinja2 import Template
@@ -28,6 +31,13 @@ from openai import APIError, OpenAI
 
 from vantage_eval.models import AgentOutput, Scenario, ScenarioResult
 from vantage_eval.scorers.base import Scorer
+
+logger = logging.getLogger(__name__)
+
+#: Bump when the JSONL trace entry's shape changes incompatibly, so a training
+#: pipeline reading a file accumulated across many sessions can tell which
+#: layout each line uses.
+TRACE_SCHEMA_VERSION = 1
 
 # One preset per OpenAI-compatible provider: which model to default to, where
 # to send requests, which env var holds the key, and per-1M-token pricing (both
@@ -110,11 +120,13 @@ class LLMJudgeScorer(Scorer):
         temperature: float = 0.0,
         provider: str = "openai",
         base_url: Optional[str] = None,
+        trace_log_path: Optional[Path] = None,
     ) -> None:
         if provider not in PROVIDER_PRESETS:
             raise ValueError(f"Unknown judge provider {provider!r}; must be one of {list(PROVIDER_PRESETS)}")
         preset = PROVIDER_PRESETS[provider]
 
+        self.provider = provider
         self.model = model or preset["model"]
         self.temperature = temperature
         self._input_cost_per_mtok = preset["input_cost_per_mtok"]
@@ -123,6 +135,15 @@ class LLMJudgeScorer(Scorer):
         resolved_key = api_key or os.environ[preset["api_key_env"]]
         self.client = OpenAI(api_key=resolved_key, base_url=base_url or preset["base_url"])
         self.total_cost_usd = 0.0
+
+        # Training-data collection (see data/README.md). When set, every judgment
+        # that parsed cleanly is appended to this JSONL file; judgments that
+        # didn't are counted in traces_skipped rather than logged — see score().
+        self.trace_log_path = Path(trace_log_path) if trace_log_path is not None else None
+        self.traces_logged = 0
+        self.traces_skipped = 0
+        if self.trace_log_path is not None:
+            self._prepare_trace_log(self.trace_log_path)
 
     def score(self, scenario: Scenario, output: AgentOutput, result: ScenarioResult) -> None:
         if not scenario.rubric.llm_judge_prompt:
@@ -156,6 +177,8 @@ class LLMJudgeScorer(Scorer):
             # philosophy as runner._run_one catching adapter exceptions.
             result.llm_judge_score = 0.0
             result.llm_judge_reasoning = f"judge_error: {type(e).__name__}: {e}"
+            if self.trace_log_path is not None:
+                self.traces_skipped += 1  # no judgment was made — nothing to learn from
             return
 
         raw = response.choices[0].message.content or ""
@@ -167,20 +190,36 @@ class LLMJudgeScorer(Scorer):
             out_cost = response.usage.completion_tokens * self._output_cost_per_mtok / 1_000_000
             self.total_cost_usd += in_cost + out_cost
 
+        parsed_ok = False
         try:
             parsed = json.loads(raw)
             score_val = float(parsed.get("score", 0))
             reasoning = str(parsed.get("reasoning", ""))
-        except (json.JSONDecodeError, ValueError, TypeError):
+            parsed_ok = True
+        except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
             # Model returned malformed JSON — record as 0 score with the raw text
             score_val = 0.0
             reasoning = f"parse_error: {raw[:200]}"
+
+        # Only a judgment the judge actually made is worth training on: it
+        # parsed, and its score sat inside the documented 1-5 range *before*
+        # the clamp below. Checked here, ahead of the clamp, because clamping
+        # would otherwise launder a raw `"score": 7` into a 5.0 label that
+        # contradicts the raw_response sitting next to it in the log — and a
+        # 0.0 parse/judge_error placeholder isn't a label at all.
+        loggable = parsed_ok and 1.0 <= score_val <= 5.0
 
         # Clamp to valid range
         score_val = max(0.0, min(5.0, score_val))
 
         result.llm_judge_score = score_val
         result.llm_judge_reasoning = reasoning
+
+        if self.trace_log_path is not None:
+            if loggable:
+                self._log_trace(scenario, output, user_prompt, raw, score_val, reasoning)
+            else:
+                self.traces_skipped += 1
 
     def _render_prompt(self, scenario: Scenario, output: AgentOutput) -> str:
         # scenario.rubric.llm_judge_prompt is a Jinja2 template
@@ -201,3 +240,73 @@ class LLMJudgeScorer(Scorer):
                 "raw_output": output.raw_output,
             },
         )
+
+    @staticmethod
+    def _prepare_trace_log(path: Path) -> None:
+        """Fail fast if the log can't be written, and repair a torn last line.
+
+        Checked at construction rather than on first write so an unwritable
+        path costs seconds, not the hours of agent runs that would precede
+        the first judged scenario being lost. If a previous run was killed
+        mid-write, the file ends without a newline; the next append would
+        then fuse two entries into one unparseable line, so terminate the
+        torn line first (it stays an invalid JSON line, but only that one).
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        needs_newline = False
+        if path.exists() and path.stat().st_size > 0:
+            with path.open("rb") as f:
+                f.seek(-1, os.SEEK_END)
+                needs_newline = f.read(1) != b"\n"
+        with path.open("a", encoding="utf-8") as f:  # also proves it's writable
+            if needs_newline:
+                f.write("\n")
+
+    def _log_trace(
+        self,
+        scenario: Scenario,
+        output: AgentOutput,
+        prompt: str,
+        raw_response: str,
+        score: float,
+        reasoning: str,
+    ) -> None:
+        """Append one judgment as a JSONL line (schema: data/README.md).
+
+        A logging failure must not take down the eval run — same philosophy as
+        a judge API error above — but a silently lost training example isn't
+        free either, so it's warned about and counted in traces_skipped.
+        """
+        entry = {
+            "schema_version": TRACE_SCHEMA_VERSION,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "judge_provider": self.provider,
+            "judge_model": self.model,
+            "judge_temperature": self.temperature,
+            "scenario_id": scenario.external_id,
+            "category": scenario.category,
+            # The score guide lives here, not in input_prompt, and it has been
+            # edited over the project's life — without it an example isn't
+            # reproducible, and a mixed-prompt file can't be split by version.
+            "system_prompt": SYSTEM_PROMPT,
+            "input_prompt": prompt,
+            "raw_response": raw_response,
+            "parsed_score": int(score) if score.is_integer() else score,
+            "parsed_reasoning": reasoning,
+            "actual_output": {
+                "routed_agent": output.routed_agent,
+                "extracted_entities": output.extracted_entities,
+            },
+            "expected": scenario.expected,
+        }
+        try:
+            # default=str: one un-serializable value in an adapter's extracted
+            # entities must not cost an example (or a run).
+            line = json.dumps(entry, ensure_ascii=False, default=str)
+            with self.trace_log_path.open("a", encoding="utf-8") as f:  # type: ignore[union-attr]
+                f.write(line + "\n")
+        except (OSError, TypeError, ValueError) as e:
+            logger.warning("Could not log judge trace for %s: %s", scenario.external_id, e)
+            self.traces_skipped += 1
+            return
+        self.traces_logged += 1
