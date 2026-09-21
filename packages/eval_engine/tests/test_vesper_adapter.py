@@ -14,8 +14,11 @@ surface (an async `.run()` and a `.subscribe(event_type, handler)` an
 attempt's fake Planner can push a fake `ToolCallStartedEvent` through) to
 drive `VesperAdapter._invoke_async`'s real retry loop.
 """
+import asyncio
+import contextvars
+
 import pytest
-from vantage_eval.agents.vesper import VesperAdapter
+from vantage_eval.agents.vesper import VesperAdapter, _is_transient_error
 
 
 class _FakePlannerResult:
@@ -127,18 +130,21 @@ def test_adapter_returns_planner_failure_after_exhausted_retries(monkeypatch):
         return _FakePlannerResult(text="Sir, I'm having trouble thinking right now.", aborted=True)
 
     adapter = VesperAdapter()
-    planner = _wire_fake_planner(adapter, [_router_exhausted, _router_exhausted])
+    planner = _wire_fake_planner(
+        adapter, [_router_exhausted, _router_exhausted, _router_exhausted]
+    )
 
     out = adapter.invoke("test input", {})
 
-    assert planner.call_count == 2
+    assert planner.call_count == 3, "MAX_RETRIES=2 means three attempts in total"
     assert out.routed_agent == "PLANNER_FAILURE"
     assert "router" in (out.reasoning or "").lower()
 
 
 def test_adapter_returns_adapter_error_on_exception(monkeypatch):
     """A genuine crash in this adapter's own code (not Vesper's LLM) must
-    stay distinctly ADAPTER_ERROR, never PLANNER_FAILURE."""
+    stay distinctly ADAPTER_ERROR, never PLANNER_FAILURE — and, being
+    deterministic, must fail fast instead of being retried."""
     monkeypatch.setattr(VesperAdapter, "RETRY_BACKOFF_S", 0)
 
     adapter = VesperAdapter()
@@ -148,9 +154,152 @@ def test_adapter_returns_adapter_error_on_exception(monkeypatch):
 
     out = adapter.invoke("test input", {})
 
-    assert planner.call_count == 2, "adapter exceptions get the same one retry"
+    assert planner.call_count == 1, "a non-transient exception must not be retried"
     assert out.routed_agent == "ADAPTER_ERROR"
     assert "RuntimeError" in (out.reasoning or "")
+
+
+def test_adapter_retries_on_transient_groq_error(monkeypatch):
+    """The stand-in for Groq's 'network error' escaping Planner.run() as an
+    exception: retried, and the second attempt's result is what's reported."""
+    monkeypatch.setattr(VesperAdapter, "RETRY_BACKOFF_S", 0)
+
+    async def _reply_only(event_bus):
+        return _FakePlannerResult(text="hi", aborted=False)
+
+    adapter = VesperAdapter()
+    planner = _wire_fake_planner(
+        adapter, [RuntimeError("Groq network error: Connection error."), _reply_only]
+    )
+
+    out = adapter.invoke("test", {})
+
+    assert out.routed_agent == "chat_agent"
+    assert planner.call_count == 2
+
+
+def test_transient_exception_that_never_clears_is_planner_failure(monkeypatch):
+    """Retries are capped (three attempts). A transient error that outlasts
+    them is infrastructure failing, so it shares PLANNER_FAILURE's label —
+    not ADAPTER_ERROR, which is reserved for bugs in this adapter."""
+    monkeypatch.setattr(VesperAdapter, "RETRY_BACKOFF_S", 0)
+    boom = RuntimeError("Error code: 503 - Service Unavailable")
+
+    adapter = VesperAdapter()
+    planner = _wire_fake_planner(adapter, [boom, boom, boom, boom])
+
+    out = adapter.invoke("test", {})
+
+    assert planner.call_count == 3
+    assert out.routed_agent == "PLANNER_FAILURE"
+    assert "503" in (out.reasoning or "")
+
+
+def test_backoff_doubles_on_each_retry():
+    adapter = VesperAdapter()
+    assert [adapter._backoff_s(n) for n in range(3)] == [2.0, 4.0, 8.0]
+
+
+@pytest.mark.parametrize(
+    "exc, expected",
+    [
+        (RuntimeError("Groq network error: Connection error."), True),
+        (RuntimeError("Groq network error: Request timed out."), True),
+        (RuntimeError("Error code: 429 - Too Many Requests"), True),
+        (RuntimeError("Error code: 503"), True),
+        (RuntimeError("502 Bad Gateway"), True),
+        (ConnectionResetError(), True),
+        (asyncio.TimeoutError(), True),
+        (RuntimeError("processed 4290 rows"), False),  # digits inside a longer number
+        (ImportError("No module named 'orchestrator'"), False),
+        (KeyError("tool"), False),
+        (ValueError("bad input"), False),
+    ],
+)
+def test_transient_error_classification(exc, expected):
+    assert _is_transient_error(exc) is expected
+
+
+class _LoopAffineClient:
+    """Stands in for the Groq/Ollama async clients Vesper's ModelRouter caches
+    across calls: usable only on the event loop it was first used on, exactly
+    like a pooled httpx connection. On any other loop it fails with the same
+    message the real one produced in the P32 run."""
+
+    def __init__(self):
+        self._loop = None
+
+    def use(self) -> None:
+        loop = asyncio.get_running_loop()
+        if self._loop is None:
+            self._loop = loop
+        elif loop is not self._loop:
+            raise RuntimeError("Groq network error: Connection error.")
+
+
+def test_adapter_reuses_one_event_loop_across_invocations():
+    """Regression for the P32 first-attempt failures: `asyncio.run` per call
+    made every scenario after the first hit a client bound to a dead loop
+    (36 of 40 first attempts in the 42.5% run). With one long-lived loop, N
+    invocations take N attempts — none need the retry to recover."""
+    client = _LoopAffineClient()
+
+    async def _uses_cached_client(event_bus):
+        client.use()
+        return _FakePlannerResult(text="ok", aborted=False)
+
+    adapter = VesperAdapter()
+    planner = _wire_fake_planner(adapter, [_uses_cached_client] * 4)
+    try:
+        outs = [adapter.invoke(f"scenario {i}", {}) for i in range(4)]
+    finally:
+        adapter.close()
+
+    assert planner.call_count == 4, "a call needed a retry: the loop was not reused"
+    assert [o.routed_agent for o in outs] == ["chat_agent"] * 4
+
+
+def test_adapter_isolates_scenarios_despite_sharing_a_loop():
+    """Sharing a loop must not share state: a task left running by one scenario
+    is cancelled before the next, and contextvars set during one scenario
+    (e.g. Vantage's current trace id) don't leak into the next."""
+    marker = contextvars.ContextVar("marker", default="unset")
+    stray: list[asyncio.Task] = []
+    seen: list[str] = []
+
+    async def _first(event_bus):
+        marker.set("leaked")
+        stray.append(asyncio.create_task(asyncio.sleep(3600)))
+        return _FakePlannerResult(text="ok", aborted=False)
+
+    async def _second(event_bus):
+        seen.append(marker.get())
+        return _FakePlannerResult(text="ok", aborted=False)
+
+    adapter = VesperAdapter()
+    _wire_fake_planner(adapter, [_first, _second])
+    try:
+        adapter.invoke("one", {})
+        assert stray[0].cancelled(), "a stray task outlived its scenario"
+        adapter.invoke("two", {})
+    finally:
+        adapter.close()
+
+    assert seen == ["unset"], "context set in one scenario leaked into the next"
+
+
+def test_adapter_close_is_idempotent_and_reopenable():
+    async def _ok(event_bus):
+        return _FakePlannerResult(text="ok", aborted=False)
+
+    adapter = VesperAdapter()
+    _wire_fake_planner(adapter, [_ok, _ok])
+    adapter.invoke("a", {})
+    adapter.close()
+    adapter.close()  # second close is a no-op
+    assert adapter._runner is None
+    assert adapter.invoke("b", {}).routed_agent == "chat_agent"  # lazily reopens
+    adapter.close()
 
 
 @pytest.mark.integration

@@ -59,17 +59,28 @@ Design principles:
      least one tool call, since every iteration up to that point needed a
      successful completion to keep the loop going). That "aborted with no
      tool calls" shape is therefore Vesper's own LLM failing, not a bug in
-     this file — see `_is_planner_failure`. It gets one retry with a short
-     backoff, since the Groq failures observed in practice are usually
-     transient and Ollama isn't running in this eval environment to rescue
-     the first attempt.
+     this file — see `_is_planner_failure`. It is retried MAX_RETRIES times
+     with exponential backoff. An exception out of `Planner.run()` gets the
+     same treatment only if `_is_transient_error` says it looks transient
+     (and lands on PLANNER_FAILURE if it outlasts the retries); anything
+     else is a bug in this file and fails fast as ADAPTER_ERROR, since a
+     retry would just repeat it.
   4. Include a Vantage trace_id in the output so we can jump from eval
      result to full trace in the dashboard.
+  5. ONE event loop for the adapter's whole life (see `_run`). Vesper's
+     ModelRouter caches its Groq/Ollama async HTTP clients across calls; an
+     async client is only valid on the loop that created it, so running each
+     scenario under its own `asyncio.run()` made nearly every call after the
+     first start by reusing a dead pooled connection ("Groq network error:
+     Connection error."), then wait out the local fallback's 60s timeout.
 """
 from __future__ import annotations
 
 import asyncio
+import atexit
+import contextvars
 import logging
+import re
 import time
 from typing import Any
 from uuid import UUID
@@ -81,6 +92,33 @@ from vantage_eval.agents.base import AgentAdapter
 from vantage_eval.models import AgentOutput
 
 log = logging.getLogger(__name__)
+
+#: Substrings (matched case-insensitively against "ExcType: message") that mark
+#: an exception as a transient network/provider hiccup worth retrying rather
+#: than a bug in this adapter. Bare status codes are matched as whole numbers,
+#: so "processed 4290 rows" doesn't count as an HTTP 429.
+TRANSIENT_GROQ_ERROR_PATTERNS = (
+    "network error",
+    "connection error",
+    "too many requests",
+    "429",
+    "503",
+    "bad gateway",
+    "timeout",
+    "timed out",
+)
+
+
+def _is_transient_error(e: Exception) -> bool:
+    """True if `e` looks like a transient network/provider failure (worth a
+    retry) rather than a deterministic bug (a retry would only repeat it)."""
+    if isinstance(e, (ConnectionError, TimeoutError)):
+        return True
+    msg = f"{type(e).__name__}: {e}".lower()
+    return any(
+        re.search(rf"\b{p}\b", msg) if p.isdigit() else p in msg
+        for p in TRANSIENT_GROQ_ERROR_PATTERNS
+    )
 
 
 class VesperAdapter(AgentAdapter):
@@ -103,11 +141,13 @@ class VesperAdapter(AgentAdapter):
     #: in this file) — distinct from Vesper's LLM failing.
     ADAPTER_ERROR = "ADAPTER_ERROR"
 
-    #: One retry on a transient failure. Most Groq "Connection error"
-    #: failures observed in practice resolve on the second attempt, and
-    #: Ollama (the router's only fallback) isn't running in this eval
-    #: environment to rescue the first one.
-    MAX_RETRIES = 1
+    #: Retries after the first attempt (so three attempts in total). Groq
+    #: does have real transient failures (429s, timeouts, 5xx) that a fresh
+    #: attempt usually clears; Vesper's own router doesn't retry them
+    #: (`AsyncGroq(max_retries=0)`) and its local Ollama fallback has never
+    #: rescued a turn in this environment (it read-times-out at 60s).
+    MAX_RETRIES = 2
+    #: Doubled on each retry: 2s before the 2nd attempt, 4s before the 3rd.
     RETRY_BACKOFF_S = 2.0
 
     def __init__(
@@ -123,6 +163,7 @@ class VesperAdapter(AgentAdapter):
         self._planner: Any = None
         self._event_bus: Any = None
         self._ToolCallStartedEvent: Any = None
+        self._runner: asyncio.Runner | None = None
 
     def _ensure_ready(self) -> None:
         """Build the Planner + supporting objects once, lazily.
@@ -211,9 +252,55 @@ class VesperAdapter(AgentAdapter):
         self._event_bus = event_bus
         self._ToolCallStartedEvent = ToolCallStartedEvent
 
+    def _run(self, coro: Any) -> Any:
+        """Run `coro` on this adapter's single long-lived event loop.
+
+        Deliberately not `asyncio.run(coro)`, which builds and *closes* a new
+        loop on every call. The Planner's ModelRouter (built once, in
+        `_ensure_ready`) caches its Groq/Ollama async HTTP clients, and a
+        pooled connection belongs to the loop that opened it — so after the
+        first scenario every call began by reusing a dead connection and
+        failing with "Connection error". In the 42.5% P32 run that was 36 of
+        40 first attempts, each followed by a ~60s wait on the Ollama
+        fallback. A `Runner` keeps one loop (and so one valid connection
+        pool) alive across invocations.
+
+        Each call still gets a fresh copy of the context, matching
+        `asyncio.run`'s isolation, so nothing set during one scenario (e.g.
+        Vantage's current trace id) can leak into the next.
+        """
+        if self._runner is None:
+            self._runner = asyncio.Runner()
+            atexit.register(self.close)
+        return self._runner.run(coro, context=contextvars.copy_context())
+
+    def close(self) -> None:
+        """Close the adapter's event loop. Safe to call more than once."""
+        runner, self._runner = self._runner, None
+        if runner is not None:
+            runner.close()
+
+    async def _invoke_isolated(self, input: str, context: dict[str, Any]) -> AgentOutput:
+        """`_invoke_async`, then cancel anything it left running.
+
+        `asyncio.run` cancelled leftover tasks when it tore its loop down; a
+        loop that lives across scenarios has to do that explicitly, or a
+        stray task from one scenario could keep running (and emit events)
+        during the next.
+        """
+        try:
+            return await self._invoke_async(input, context)
+        finally:
+            current = asyncio.current_task()
+            stray = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+            for task in stray:
+                task.cancel()
+            if stray:
+                await asyncio.gather(*stray, return_exceptions=True)
+
     def invoke(self, input: str, context: dict[str, Any]) -> AgentOutput:
         try:
-            return asyncio.run(self._invoke_async(input, context))
+            return self._run(self._invoke_isolated(input, context))
         except Exception as e:
             # Last-resort net: _invoke_async's own retry loop below already
             # converts the expected failure surface (a Planner exception, or
@@ -236,12 +323,19 @@ class VesperAdapter(AgentAdapter):
                 result, tool_calls = await self._run_planner_once(input, context)
             except Exception as e:
                 latency_ms = int((time.monotonic() - start) * 1000)
-                log.warning(f"ADAPTER_ERROR on attempt {attempt}: {type(e).__name__}: {e}")
-                if attempt < self.MAX_RETRIES:
-                    await asyncio.sleep(self.RETRY_BACKOFF_S)
+                transient = _is_transient_error(e)
+                log.warning(
+                    f"invoke exception on attempt {attempt} (transient={transient}): "
+                    f"{type(e).__name__}: {e}"
+                )
+                if transient and attempt < self.MAX_RETRIES:
+                    await asyncio.sleep(self._backoff_s(attempt))
                     continue
                 return AgentOutput(
-                    routed_agent=self.ADAPTER_ERROR,
+                    # A transient error that outlasts every retry is the same
+                    # kind of failure as router exhaustion — infrastructure,
+                    # not this adapter — so it shares that label.
+                    routed_agent=self.PLANNER_FAILURE if transient else self.ADAPTER_ERROR,
                     latency_ms=latency_ms,
                     reasoning=f"{type(e).__name__}: {e}",
                     trace_id=self._current_trace_id(),
@@ -253,7 +347,7 @@ class VesperAdapter(AgentAdapter):
             if self._is_planner_failure(result, tool_calls):
                 log.info(f"PLANNER_FAILURE on attempt {attempt} (input={input[:60]!r})")
                 if attempt < self.MAX_RETRIES:
-                    await asyncio.sleep(self.RETRY_BACKOFF_S)
+                    await asyncio.sleep(self._backoff_s(attempt))
                     continue
                 return AgentOutput(
                     routed_agent=self.PLANNER_FAILURE,
@@ -311,6 +405,10 @@ class VesperAdapter(AgentAdapter):
         finally:
             token.unsubscribe()
         return result, tool_calls
+
+    def _backoff_s(self, attempt: int) -> float:
+        """Seconds to wait after a failed `attempt` (0-based): 2s, 4s, ..."""
+        return self.RETRY_BACKOFF_S * (2**attempt)
 
     @staticmethod
     def _is_planner_failure(result: Any, tool_calls: list[dict[str, Any]]) -> bool:
