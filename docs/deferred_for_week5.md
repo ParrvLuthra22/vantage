@@ -42,6 +42,12 @@ from "N scenarios failed," rather than silently inflating the failure count. Sam
 *class* as item 2, opposite end of the pipeline — the agent-under-test's infrastructure vs.
 the judge's own.
 
+**This isn't edge-case noise — it's a quantifiable chunk of the pass-rate signal.** Run
+`e3f53cd8` alone: 5 of 40 scenarios (12.5% of the suite) contaminated in one run, moving that
+run's pass rate from 62.5% raw to 71.4% adjusted (excluding the 5 as inconclusive rather than
+counting them as failed) — a 9-point swing from pipeline infrastructure, not agent quality.
+That 9 points is the concrete value of doing this fix in Week 5.
+
 ## 4. Diagnose Vesper's Ollama fallback failing under load
 
 `ModelRouter`'s Ollama fallback (`qwen3.5:latest`) has failed **53 of 53** observed attempts
