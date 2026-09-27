@@ -1,28 +1,70 @@
-# Interview exhibits
+# Interview Exhibits
 
-Real evidence, pulled from actual eval runs against real Vesper, of what this project's
-measurement layer catches and why the fix that shipped this sprint (`1948256` — show the
-judge the whole turn, not just the first tool call) mattered. Read these first if you're
-auditing what this eval harness actually found, not just what it's supposed to do.
+Concrete evidence of what Vantage's evaluation infrastructure has caught in real Vesper runs.
+These are not synthetic examples — every exhibit references a real Postgres `run_id` from a
+real 40-scenario suite execution against real Vesper.
 
-- **[hallucination_caught_by_measurement_fix.md](hallucination_caught_by_measurement_fix.md)**
-  — `clear_001`. The original exhibit: Vesper calls a harmless read-only tool, then tells
-  the user a meeting was booked. Never visible to the pre-fix judge, which only saw
-  `routed_agent`, never the reply.
-- **[hallucination_clear_005_email.md](hallucination_clear_005_email.md)** — `clear_005`,
-  same failure class, second instance: `chat_agent` implies it can send an email once given
-  missing details, when Vesper has no email tool at all.
-- **[hallucination_clear_009_reminder.md](hallucination_clear_009_reminder.md)** —
-  `clear_009`, same failure class, third instance, across a calendar/email/reminders spread
-  of domains: `chat_agent` claims (or, in one run, hedges but still implies) a reminder was
-  set with no mechanism to do so.
-- **[measurement_fix_ab_evidence.md](measurement_fix_ab_evidence.md)** — `context_dependent_004`,
-  the other direction of error. Same real Vesper behavior (get_volume → set_volume(60),
-  correctly reported), scored 1/5 with byte-identical reasoning in two separate pre-fix
-  runs, then 5/5 in two separate post-fix runs. Nothing about Vesper changed between the
-  two pairs — only what the judge could see. The cleanest available proof the fix works.
+## Hallucination detection (3 instances of the same failure class)
 
-Together: three independent examples of the same hallucination class turn "we found one
-bug" into "we found a pattern," and the A/B pair proves the fix corrects false negatives
-(this exhibit) as well as false positives (the three hallucination exhibits) — not just one
-direction of judge error.
+The pre-measurement-fix judge input format made an entire class of failure invisible: agent-
+hallucinated action completion. Three independent examples caught after `1948256`:
+
+- [`hallucination_caught_by_measurement_fix.md`](hallucination_caught_by_measurement_fix.md) —
+  `clear_001`. Vesper called `get_date()` then fabricated "Your meeting with Priya has been
+  scheduled." Judge caught the hallucination once it could see the reply.
+- [`hallucination_clear_005_email.md`](hallucination_clear_005_email.md) — `clear_005`.
+  `chat_agent` asked for email details "so I can send the email promptly" when Vesper has no
+  email tool.
+- [`hallucination_clear_009_reminder.md`](hallucination_clear_009_reminder.md) — `clear_009`.
+  `chat_agent` claimed "Your reminder to call Mom has been set" when Vesper has no reminders
+  tool (a second sample of the same scenario shows the subtler, hedged version of the same
+  failure — a question implying capability rather than a flat claim).
+
+The generalization: measurement infrastructure that hides part of the agent's behavior from
+the judge will systematically miss hallucination-class failures. The three exhibits are
+separate concrete cases of that pattern, not one lucky catch.
+
+## A/B evidence of the measurement fix (deterministic)
+
+- [`measurement_fix_ab_evidence.md`](measurement_fix_ab_evidence.md) — `context_dependent_004`.
+  Same scenario, same real Vesper behavior across four runs. Pre-fix judges scored it 1/5
+  twice, with byte-identical reasoning. Post-fix judges scored it 5/5 twice. The judge input
+  changed; the agent behavior didn't. The cleanest available proof the fix corrected a real
+  measurement gap rather than just re-scaling noise — and that it corrects false negatives
+  (this exhibit) as well as false positives (the three hallucination exhibits above).
+
+## What these support in an interview
+
+- **"How do you know your eval infrastructure catches real bugs?"** → these four exhibits,
+  three of them independent instances of the same failure class.
+- **"How did you validate that a measurement change was correct, not just a re-scaling of
+  noise?"** → the A/B evidence file — same behavior, same rubric, same judge model, opposite
+  verdicts, explained entirely by what the judge could see.
+- **"How did you diagnose the measurement problem in the first place?"** → the A/B file
+  documents the byte-identical-judge-reasoning-across-runs observation that surfaced it: two
+  separate real runs producing word-for-word identical scoring reasoning is a strong signal
+  the judge is reasoning from incomplete, deterministic input rather than actually observing
+  the agent.
+
+## What's NOT here (and why)
+
+- **Screenshots of dashboards.** Raw text over screenshots for grep-ability and diff-ability.
+  Add screenshots when a specific interview needs the visual.
+- **The initial 20% first-real-run evidence.** That's `docs/baselines/
+  orchestrator_v1_pre_iteration_20260915.log` — a separate exhibit for "how iteration and
+  the baseline process work," not for "what the infrastructure catches."
+
+## Checklist
+
+All exhibits referenced above exist and are linked correctly as of this writing — nothing
+below is a placeholder.
+
+- [x] `hallucination_caught_by_measurement_fix.md` (`clear_001`)
+- [x] `hallucination_clear_005_email.md` (`clear_005`)
+- [x] `hallucination_clear_009_reminder.md` (`clear_009`)
+- [x] `measurement_fix_ab_evidence.md` (`context_dependent_004`)
+
+Candidate future exhibit, not yet written: the 2026-09-28 baseline run itself
+(`docs/baselines/orchestrator_v1_baseline_20260928.md`, once that run completes) — "how a
+real baseline gets marked, including the honest range across samples" is a different story
+than any exhibit above and would deserve its own entry here once it exists.
