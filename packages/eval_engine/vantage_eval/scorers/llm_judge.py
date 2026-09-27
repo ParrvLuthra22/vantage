@@ -204,8 +204,13 @@ class LLMJudgeScorer(Scorer):
             # One scenario's judge call failing (rate limit, provider hiccup,
             # a too-dense prompt blowing the token budget even at 2048) must
             # never take down the other 39 scenarios in the run — same
-            # philosophy as runner._run_one catching adapter exceptions.
-            result.llm_judge_score = 0.0
+            # philosophy as runner._run_one catching adapter exceptions. This
+            # is the judge's OWN infrastructure failing, not a verdict on the
+            # agent under test, so it's flagged distinctly (judge_error) rather
+            # than clamped to a numeric 0 that looks like a real "scored this
+            # a 0" judgment — see docs/deferred_for_week5.md item 3.
+            result.judge_error = True
+            result.llm_judge_score = None
             result.llm_judge_reasoning = f"judge_error: {type(e).__name__}: {e}"
             if self.trace_log_path is not None:
                 self.traces_skipped += 1  # no judgment was made — nothing to learn from
@@ -219,6 +224,18 @@ class LLMJudgeScorer(Scorer):
             in_cost = response.usage.prompt_tokens * self._input_cost_per_mtok / 1_000_000
             out_cost = response.usage.completion_tokens * self._output_cost_per_mtok / 1_000_000
             self.total_cost_usd += in_cost + out_cost
+
+        if not raw.strip():
+            # The call succeeded but came back with nothing — observed with
+            # qwen3's hidden reasoning trace exhausting max_completion_tokens
+            # without erroring. Also judge infrastructure, not a verdict: the
+            # judge never actually looked at the routing decision.
+            result.judge_error = True
+            result.llm_judge_score = None
+            result.llm_judge_reasoning = "judge_error: empty response from judge model"
+            if self.trace_log_path is not None:
+                self.traces_skipped += 1
+            return
 
         parsed_ok = False
         try:

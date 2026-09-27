@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
 import httpx
-from openai import APIStatusError
+from openai import APIStatusError, APITimeoutError, RateLimitError
 from vantage_eval.models import AgentOutput, Rubric, Scenario, ScenarioResult
 from vantage_eval.scorers.llm_judge import SYSTEM_PROMPT, LLMJudgeScorer
 
@@ -56,9 +56,12 @@ def test_judge_handles_malformed_json():
 
 def test_judge_api_error_does_not_crash_the_run():
     """A provider-side failure (rate limit, 400 from a token-budget-exhausted
-    reasoning model, ...) must score 0 with a diagnosable reason, not raise —
-    one scenario's judge call failing must never take down the other 39 in a
-    suite run (see runner._run_one's matching handling of adapter crashes)."""
+    reasoning model, ...) must be flagged judge_error with a diagnosable
+    reason, not raise and not scored as a real 0 — one scenario's judge call
+    failing must never take down the other 39 in a suite run (see
+    runner._run_one's matching handling of adapter crashes), and must never
+    be counted as a real "the agent was wrong" verdict (see
+    docs/deferred_for_week5.md item 3)."""
     scenario = Scenario(
         external_id="t1", category="clear", complexity="single_step",
         input="x", expected={}, rubric=Rubric(llm_judge_prompt="judge {{ input }}"),
@@ -78,8 +81,77 @@ def test_judge_api_error_does_not_crash_the_run():
     )
 
     scorer.score(scenario, output, result)
-    assert result.llm_judge_score == 0.0
+    assert result.judge_error is True
+    assert result.llm_judge_score is None
     assert "judge_error" in result.llm_judge_reasoning
+    assert result.aggregate_pass() is False
+
+
+def test_judge_rate_limit_marks_judge_error_not_a_real_zero():
+    """The concrete failure mode that motivated this: out_of_scope_006 and
+    five other scenarios across two sample runs failed with a 429 on the
+    judge's own OTPM cap, silently deflating the suite's pass rate — see
+    docs/deferred_for_week5.md item 3."""
+    scenario = Scenario(
+        external_id="t1", category="clear", complexity="single_step",
+        input="x", expected={}, rubric=Rubric(llm_judge_prompt="judge {{ input }}"),
+    )
+    output = AgentOutput(routed_agent="chat_agent", latency_ms=10)
+    result = ScenarioResult(external_id="t1", output=output)
+
+    scorer = LLMJudgeScorer(api_key="fake")
+    scorer.client = MagicMock()
+    response = httpx.Response(
+        429, request=httpx.Request("POST", "https://api.example.com/x"), json={}
+    )
+    scorer.client.chat.completions.create.side_effect = RateLimitError(
+        "rate limit exceeded", response=response, body=None
+    )
+
+    scorer.score(scenario, output, result)
+    assert result.judge_error is True
+    assert result.llm_judge_score is None
+
+
+def test_judge_timeout_marks_judge_error():
+    scenario = Scenario(
+        external_id="t1", category="clear", complexity="single_step",
+        input="x", expected={}, rubric=Rubric(llm_judge_prompt="judge {{ input }}"),
+    )
+    output = AgentOutput(routed_agent="chat_agent", latency_ms=10)
+    result = ScenarioResult(external_id="t1", output=output)
+
+    scorer = LLMJudgeScorer(api_key="fake")
+    scorer.client = MagicMock()
+    scorer.client.chat.completions.create.side_effect = APITimeoutError(
+        request=httpx.Request("POST", "https://api.example.com/x")
+    )
+
+    scorer.score(scenario, output, result)
+    assert result.judge_error is True
+    assert result.llm_judge_score is None
+
+
+def test_judge_empty_response_marks_judge_error_not_a_parse_error():
+    """A successful call that comes back with nothing (qwen3's hidden
+    reasoning trace exhausting the completion budget without erroring) is
+    judge infrastructure, not a malformed judgment — must not fall into the
+    parse_error/0.0 path, which would look like a real verdict."""
+    scenario = Scenario(
+        external_id="t1", category="clear", complexity="single_step",
+        input="x", expected={}, rubric=Rubric(llm_judge_prompt="judge {{ input }}"),
+    )
+    output = AgentOutput(routed_agent="chat_agent", latency_ms=10)
+    result = ScenarioResult(external_id="t1", output=output)
+
+    scorer = LLMJudgeScorer(api_key="fake")
+    scorer.client = MagicMock()
+    scorer.client.chat.completions.create.return_value = _fake_response("")
+
+    scorer.score(scenario, output, result)
+    assert result.judge_error is True
+    assert result.llm_judge_score is None
+    assert "empty response" in result.llm_judge_reasoning
 
 
 def test_system_prompt_immunizes_against_embedded_input():

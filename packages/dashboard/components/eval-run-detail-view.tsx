@@ -58,6 +58,11 @@ export function EvalRunDetailView({ run }: { run: EvalRunDetail }) {
           />
           <MetricCard label="Known failing" value={run.summary.known_failing.toString()} sub="excluded above" />
           <MetricCard
+            label="Judge errors"
+            value={run.summary.judge_error.toString()}
+            sub={run.summary.judge_error ? "judge infra, excluded above" : undefined}
+          />
+          <MetricCard
             label="Avg judge score"
             value={run.summary.avg_llm_score != null ? run.summary.avg_llm_score.toFixed(2) : "—"}
           />

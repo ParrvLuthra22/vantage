@@ -66,6 +66,7 @@ export interface EvalRunSummary {
   pass_rate: number;
   total_scenarios: number;
   known_failing: number;
+  judge_error: number;
   avg_llm_score: number | null;
   total_judge_cost_usd: number;
   duration_seconds: number;

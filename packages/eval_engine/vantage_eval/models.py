@@ -115,8 +115,20 @@ class ScenarioResult(BaseModel):
     *suite* summary and reports bucket the result, not whether it "really"
     passed."""
 
+    judge_error: bool = False
+    """Set by LLMJudgeScorer when the JUDGE's own API call failed (rate limit,
+    timeout, connection error) or returned an empty response — not a real
+    judgment of the agent under test. Bucketed out of the pass-rate
+    denominator the same way known_failing is (see SuiteRunSummary), but for
+    the opposite reason: known_failing is a documented product bug that keeps
+    failing; judge_error is pipeline noise that says nothing about the agent.
+    llm_judge_score stays None in this case rather than a clamped 0.0, so it
+    can't be mistaken for a real score."""
+
     def aggregate_pass(self, min_llm_score: float = 4.0) -> bool:
         """Compute overall pass/fail from component scores."""
+        if self.judge_error:
+            return False  # no verdict was reached; excluded from the denominator anyway
         if any(not r.passed for r in self.deterministic_results):
             return False
         if self.latency_within_budget is False:
@@ -138,6 +150,11 @@ class SuiteRunSummary(BaseModel):
     pass_rate: float
     total_scenarios: int
     known_failing: int = 0
+    judge_error: int = 0
+    """Count of scenarios excluded from total/passed/failed because the
+    judge's own API call failed or returned nothing — see
+    ScenarioResult.judge_error. Distinct from known_failing: this is
+    infrastructure noise, not a documented agent gap."""
     avg_llm_score: Optional[float] = None
     total_judge_cost_usd: float = 0.0
     duration_seconds: float = 0.0

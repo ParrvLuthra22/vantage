@@ -15,6 +15,7 @@ export function EvalRunsTable({ runs }: { runs: EvalRun[] }) {
             <th className="px-4 py-3 font-medium">Agent version</th>
             <th className="px-4 py-3 font-medium text-right">Pass rate</th>
             <th className="px-4 py-3 font-medium text-right">Known failing</th>
+            <th className="px-4 py-3 font-medium text-right">Judge errors</th>
             <th className="px-4 py-3 font-medium text-right">Judge cost</th>
             <th className="px-4 py-3 font-medium">Status</th>
           </tr>
@@ -42,6 +43,9 @@ export function EvalRunsTable({ runs }: { runs: EvalRun[] }) {
               </td>
               <td className="px-4 py-3 text-sm font-mono text-right">
                 {r.summary.known_failing || "—"}
+              </td>
+              <td className="px-4 py-3 text-sm font-mono text-right">
+                {r.summary.judge_error || "—"}
               </td>
               <td className="px-4 py-3 text-sm font-mono text-right">
                 {formatCost(r.summary.total_judge_cost_usd)}

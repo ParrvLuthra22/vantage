@@ -170,6 +170,7 @@ def test_judge_api_error_is_skipped_not_logged(tmp_path):
 
     result = _judge(scorer)
 
+    assert result.judge_error is True
     assert "judge_error" in result.llm_judge_reasoning
     assert _lines(log) == []
     assert scorer.traces_skipped == 1

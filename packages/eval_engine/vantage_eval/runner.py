@@ -56,6 +56,8 @@ def run_suite(
             if verbose:
                 if result.known_failing:
                     mark, style = "⚠", "yellow"
+                elif result.judge_error:
+                    mark, style = "◌", "blue"
                 else:
                     mark, style = ("✓", "green") if result.passed else ("✗", "red")
                 console.print(
@@ -108,7 +110,10 @@ def _summarize(
 ) -> SuiteRunSummary:
     total_scenarios = len(results)
     known_failing_results = [r for r in results if r.known_failing]
-    effective_results = [r for r in results if not r.known_failing]
+    # A scenario can be both known_failing and judge_error; count it under
+    # known_failing only so the two exclusion buckets don't double-count it.
+    judge_error_results = [r for r in results if r.judge_error and not r.known_failing]
+    effective_results = [r for r in results if not r.known_failing and not r.judge_error]
 
     total = len(effective_results)
     passed = sum(1 for r in effective_results if r.passed)
@@ -127,6 +132,7 @@ def _summarize(
         pass_rate=pass_rate,
         total_scenarios=total_scenarios,
         known_failing=len(known_failing_results),
+        judge_error=len(judge_error_results),
         avg_llm_score=avg_llm,
         total_judge_cost_usd=judge_cost,
         duration_seconds=duration_s,
