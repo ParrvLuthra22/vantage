@@ -48,21 +48,45 @@ run's pass rate from 62.5% raw to 71.4% adjusted (excluding the 5 as inconclusiv
 counting them as failed) — a 9-point swing from pipeline infrastructure, not agent quality.
 That 9 points is the concrete value of doing this fix in Week 5.
 
-## 4. Diagnose Vesper's Ollama fallback failing under load
+## 4. ~~Diagnose Vesper's Ollama fallback failing under load~~ — FIXED, vesper `911410e`
 
-`ModelRouter`'s Ollama fallback (`qwen3.5:latest`) has failed **53 of 53** observed attempts
-across the two full runs on 2026-09-21 night and 2026-09-22 (49 during a Groq
-tokens-per-day exhaustion, 4 more the next day under an ordinary tokens-per-minute 429) —
-always "Ollama network error", no other message. This is not Ollama being unreachable:
-`curl localhost:11434/api/tags` answers fine standalone, every time checked. Something about
-*how the router invokes Ollama* — under load, or specifically right after a Groq 429 — is
-failing. Effect: every Groq rate-limit hit currently costs the full ~60s Ollama timeout with
-no real rescue, which is why `context_dependent_004` took 75.6s in sample 1 despite a 20s
-budget that assumed a working fallback. This matters for eval-gate CI reliability once that's
-turned on for real — a flaky fallback under load is exactly the condition CI runs will hit.
-Out of scope for the eval harness itself (this is Vesper-side, in `llm/router.py`'s Ollama
-client path, not anything in `packages/eval_engine`), but worth a dedicated look before
-leaning on CI gating in production.
+`ModelRouter`'s Ollama fallback failed **53 of 53** observed attempts across the two full
+runs on 2026-09-21 night and 2026-09-22 (49 during a Groq tokens-per-day exhaustion, 4 more
+the next day under an ordinary tokens-per-minute 429) — always "Ollama network error", no
+other message. This was not Ollama being unreachable (`curl localhost:11434/api/tags`
+answered fine standalone every time checked), and it was not a `router.py` bug either.
+
+**Root cause: a Vesper packaging bug, not a router bug.** `config/settings.yaml` — which
+correctly configures `llm.fallback.model: llama3.2:3b` (2.0GB, fixed in vesper `f96be6a`;
+the file's own comment: "Deliberately a 3B model... Do NOT raise this to a 7B... that is the
+exact change that made the machine unusable before") — was silently **excluded from every
+installed copy of the vesper package**. `setuptools` only bundles `.py` files for a package
+found via `[tool.setuptools.packages.find]` unless `package-data` says otherwise; vesper's
+`pyproject.toml` had no such entry, so `pip wheel .` produced a wheel with `config/settings.py`
+but no `config/settings.yaml` (also silently dropped: `config/persona.md`, the cause of this
+session's unrelated "could not read persona file" warnings, and `config/formats/reel.md`).
+With the YAML missing, `config.settings.load_settings()` fell through entirely to
+`LLMTierSettings`'s Pydantic class default — a stale `fallback.model="qwen3.5:latest"`
+(6.6GB) that predates the `f96be6a` fix and was never removed from `settings.py` once the
+YAML became the real source of truth. This is exactly why it only showed up in vantage's
+eval harness (which installs vesper as a `pip`/`uv` git dependency into its own venv,
+`packages/eval_engine`'s `vesper @ git+...@vesper`) and not in real day-to-day Vesper usage
+(which runs in-place from the checkout, where `settings.yaml` sits right next to
+`settings.py` and loads correctly).
+
+**Reproduced** with `scripts/probe_ollama_fallback.py` (added in the fix commit) calling the
+real `OllamaProvider` class directly: 6/6 calls to `qwen3.5:latest` timed out at ~60-63s
+regardless of free RAM (0.23GB-2.16GB across attempts, all below or near the "37.8s cold"
+figure `router.py`'s own comment measured at 1GB free); `llama3.2:3b` succeeded cleanly in
+7.8s every time. **Fix**: `[tool.setuptools.package-data]` entry bundling `config/*.yaml`,
+`config/*.md`, `config/formats/*.md` (vesper commit `911410e` on the `vesper` branch).
+**Verified**: rebuilt vesper's wheel, reinstalled it into vantage's own venv, confirmed
+`config.settings.load_config_dict()` now resolves `llama3.2:3b` (was `qwen3.5:latest`), and
+a direct `OllamaProvider` call from that venv succeeded in 7.8s. No Vantage eval run was
+triggered to verify end-to-end — Groq's planner quota was exhausted from the same day's
+testing (item 5) — real end-to-end verification is the 2026-09-28 baseline collection run,
+which will now install the fixed vesper package via the same `uv pip install` path the CI
+eval-gate workflow uses.
 
 ## 5. Groq free-tier planner model has a 200k TPD ceiling that caps daily CI throughput
 
