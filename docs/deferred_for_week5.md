@@ -40,12 +40,6 @@ that needs the user, not something to fake or skip past silently. Whenever Neon/
 provisioned, `alembic upgrade head` against that `DATABASE_URL` is the entire remaining step —
 the migration itself is already written, reviewed, and proven correct against local Postgres.
 
-Discovered along the way, unrelated to this fix and NOT touched: `eval_suites.description` is
-`VARCHAR(512)`, and `orchestrator_v1_smoke`'s real description exceeds that — every attempt to
-persist a run of that suite has been silently failing (`persist_run` catches and logs the
-error, so the eval run itself completes and reports its scorecard normally; only the DB write
-is lost). Worth a real look, but out of scope for this task.
-
 ## 2. Skip the LLM judge on agent-side infrastructure failures
 
 Already true today, noted here so it isn't lost alongside the new item below: when
@@ -145,3 +139,29 @@ third-party quota dependency entirely. Combined with item 3's judge-side OTPM fi
 is now two independent, measured reasons (not just one) that a third-party free-tier API
 can't reliably power CI at scale — direct evidence for the Week 5 fine-tuned-judge/self-
 hosted-planner case being about reliability and deployment control, not only quality.
+
+## 6. `eval_suites.description` is `VARCHAR(512)` — `orchestrator_v1_smoke` has never persisted a run to Postgres
+
+Discovered while verifying the trajectory-persistence fix (item 1), 2026-09-27. `EvalSuite.
+description` is capped at 512 characters; `orchestrator_v1_smoke`'s real description exceeds
+that. Every attempt to persist a run of that suite raises `asyncpg.exceptions.
+StringDataRightTruncationError` inside `_upsert_suite`'s insert/update, which `persist_run`
+catches and logs as a warning — the eval run itself still completes and prints an accurate
+scorecard from the in-memory results, so this has been silent: nothing about a normal
+`vantage eval run` invocation looks broken.
+
+**Why this is a real Week 5 opening blocker, not a footnote**: `orchestrator_v1_smoke` (10
+scenarios, 2 per category) is what Vesper's `.github/workflows/eval-gate.yml` actually runs
+for CI (see `docs/vesper_routing_surface.md`). That workflow currently gates against a
+committed `.github/eval-baseline.json` file, not a live Postgres comparison, so CI itself is
+NOT broken by this today — the gate only needs the `--output` JSON, which writes successfully
+regardless of the DB failure. But it means **this suite has never once landed in Postgres**:
+no dashboard history for it, no DB-backed `vantage eval compare` against a marked baseline for
+it, no `set-baseline` API call would ever find a persisted run to mark. Any Week 5 plan that
+moves CI gating from "compare against a committed JSON" to "compare against a Postgres-marked
+baseline" (the more capable, dashboard-visible version of the same idea) will hit this
+immediately and non-obviously, because the failure has no visible symptom in a normal run —
+only `persist_run`'s logged warning, which nothing currently surfaces to a CI log reader's
+attention. Fix is small (widen the column, or truncate/hash long descriptions before storing)
+but needs a migration like item 1's; not done here since it's orthogonal to trajectory
+persistence.
