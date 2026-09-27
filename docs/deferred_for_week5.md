@@ -5,15 +5,46 @@ and its validation samples, deliberately not acted on now — scoped out to keep
 "measurement layer only," per an explicit instruction not to re-tune anything else while
 establishing the baseline. Each item names the evidence that surfaced it.
 
-## 1. Trajectory persistence in Postgres
+## 1. ~~Trajectory persistence in Postgres~~ — FIXED locally, blocked on Neon prod, `1cfabcd99636`
 
-`AgentOutput.tool_sequence` / `.tool_calls` / `.final_reply` (added in `1948256`) only reach
+`AgentOutput.tool_sequence` / `.tool_calls` / `.final_reply` (added in `1948256`) only reached
 Postgres via a `SuiteRun`'s `--output` JSON dump — `vantage_eval/persistence.py`'s `eval_results`
-write does not carry them. That means the dashboard and `vantage eval compare` can't show the
-full trajectory the judge now sees, only the first-tool `routed_agent` it always could. Needs
-a column (likely JSONB, mirroring `deterministic_scores`) plus a migration. Low risk, not
-urgent — the JSON output already gives us this for analysis; it's the *dashboard* that's
-behind.
+write didn't carry them, so the dashboard and `vantage eval compare` couldn't show the full
+trajectory the judge now sees, only the first-tool `routed_agent` it always could. This
+directly blocked Week 5's human-labeling workflow, which needs to query trajectories (e.g.
+"every multi-tool-call scenario," "every reply containing 'sent'").
+
+**Done**: `eval_results` gained `tool_sequence`/`tool_calls` (JSONB) and `final_reply` (Text),
+all nullable — migration `1cfabcd99636` ("add tool_sequence, tool_calls, final_reply to
+eval_results"), applied to local Postgres. `persistence.py`'s `_build_result` now populates
+all three; `EvalResultOut` (`schemas.py`) exposes them; no route changes needed since
+`eval_routes.get_eval_run` already returns the ORM object directly and
+`response_model=EvalRunDetail` handles the ORM→Pydantic mapping via `from_attributes`.
+Verified end to end without touching Groq (quota was exhausted — see item 5): ran the mock
+adapter against the real `orchestrator_v1` suite (`a40fa9eb-8283-4df4-91be-307f06bab435`),
+confirmed fresh rows write real (empty, since MockAdapter doesn't populate these) JSONB
+values while historical rows correctly stay NULL, and confirmed the API round-trips both
+correctly via a live `curl`. Sample query patterns for the labeling workflow are in
+`docs/queries_for_week5_labeling.sql`, each one actually run against the local DB to confirm
+it's valid SQL against the real schema (not just plausible-looking SQL) — one of the
+originally-proposed queries referenced a `eval_results.output` column that doesn't exist and
+was rewritten to use the real `deterministic_scores` JSONB column instead.
+
+**Blocked**: applying the same migration to Neon prod (the task's step 4) — there is no Neon
+database provisioned anywhere. `packages/api/.env.example`'s own comment says the prod
+`DATABASE_URL` "lives only in Railway's variables," but no Railway project exists locally
+(no CLI installed, nothing linked), and no `scripts/switch_db.sh` exists in the repo — checked
+`.env*` files, macOS keychain, and for a Railway CLI/project link before concluding this.
+Same shape as the Week 5 Modal/HF/W&B and PyPI-account blockers: account/infra provisioning
+that needs the user, not something to fake or skip past silently. Whenever Neon/Railway get
+provisioned, `alembic upgrade head` against that `DATABASE_URL` is the entire remaining step —
+the migration itself is already written, reviewed, and proven correct against local Postgres.
+
+Discovered along the way, unrelated to this fix and NOT touched: `eval_suites.description` is
+`VARCHAR(512)`, and `orchestrator_v1_smoke`'s real description exceeds that — every attempt to
+persist a run of that suite has been silently failing (`persist_run` catches and logs the
+error, so the eval run itself completes and reports its scorecard normally; only the DB write
+is lost). Worth a real look, but out of scope for this task.
 
 ## 2. Skip the LLM judge on agent-side infrastructure failures
 

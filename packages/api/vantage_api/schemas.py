@@ -120,6 +120,9 @@ class EvalResultOut(BaseModel):
     latency_ms: Optional[int]
     latency_within_budget: Optional[bool]
     passed: bool
+    tool_sequence: Optional[list[str]] = None
+    tool_calls: Optional[list[dict[str, Any]]] = None
+    final_reply: Optional[str] = None
 
 
 class EvalRunOut(BaseModel):

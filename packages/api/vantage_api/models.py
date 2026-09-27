@@ -298,6 +298,18 @@ class EvalResult(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_within_budget: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     passed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Added alongside AgentOutput.tool_sequence/tool_calls/final_reply (commit
+    # 1948256) so the whole turn — not just the first tool, which routed_agent
+    # in a scenario's rubric already captures via deterministic_scores — is
+    # queryable for Week 5's human-labeling workflow (e.g. "show me every
+    # multi-tool-call turn" or "every reply that says X"). All three nullable:
+    # every row from before this migration predates the trajectory fields
+    # entirely, so NULL means "not captured," not "empty."
+    tool_sequence: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    final_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )

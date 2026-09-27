@@ -171,6 +171,9 @@ def _build_result(run_row: EvalRun, scenario_row: EvalScenario, result) -> EvalR
         latency_ms=result.output.latency_ms,
         latency_within_budget=result.latency_within_budget,
         passed=result.passed,
+        tool_sequence=list(result.output.tool_sequence),
+        tool_calls=[dict(c) for c in result.output.tool_calls],
+        final_reply=result.output.final_reply,
     )
 
 
