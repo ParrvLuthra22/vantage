@@ -63,3 +63,30 @@ turned on for real — a flaky fallback under load is exactly the condition CI r
 Out of scope for the eval harness itself (this is Vesper-side, in `llm/router.py`'s Ollama
 client path, not anything in `packages/eval_engine`), but worth a dedicated look before
 leaning on CI gating in production.
+
+## 5. Groq free-tier planner model has a 200k TPD ceiling that caps daily CI throughput
+
+New operational finding, 2026-09-27. Four full 40-scenario real-Vesper runs in one day
+(1 fix-verification run + 2 completed samples + 1 partial sample before it was killed for
+system memory pressure — roughly 160+ planner calls, more once OTPM 429 retries and
+PLANNER_FAILURE retries are counted) exhausted the planner model's (`openai/gpt-oss-120b`)
+Groq daily quota: 199,628/200,000 TPD used, confirmed via the router's own 429 log
+("Rate limit reached... on tokens per day (TPD): Limit 200000, Used 199628"). A 5th run
+attempt was stopped mid-flight rather than let it grind through PLANNER_FAILURE/Ollama-
+fallback noise (item 4, this file) contaminating whatever it was trying to measure.
+
+This is a distinct limit from item 3's judge-model OTPM cap — different model, different
+axis (daily total vs. per-minute burst), and not something `fix(eval): right-size judge
+max_completion_tokens` (`322b6d1`) touches. **When Ollama fallback is broken (item 4), this
+hard-caps real-Vesper CI throughput at roughly 3-4 full 40-scenario runs per day**, full
+stop, regardless of pacing or retry logic — there's no graceful degradation once TPD is hit,
+every remaining scenario in a run either waits out a sliding-window gap of unpredictable
+length or falls through to a fallback that fails ~53/53 observed times under load.
+
+Options for Week 5, same shape as item 4's: (a) fix Vesper's Ollama fallback so TPD
+exhaustion has a real rescue path instead of open-ended stalls, (b) a Groq paid tier for the
+planner model specifically, (c) migrate the planner to a self-hosted model, removing the
+third-party quota dependency entirely. Combined with item 3's judge-side OTPM finding, this
+is now two independent, measured reasons (not just one) that a third-party free-tier API
+can't reliably power CI at scale — direct evidence for the Week 5 fine-tuned-judge/self-
+hosted-planner case being about reliability and deployment control, not only quality.
