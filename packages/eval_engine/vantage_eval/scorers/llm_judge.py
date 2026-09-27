@@ -185,14 +185,29 @@ class LLMJudgeScorer(Scorer):
             response = self.client.chat.completions.create(
                 model=self.model,
                 temperature=self.temperature,
-                # Some judge models (e.g. Groq's qwen/qwen3.8-27b) emit hidden
-                # reasoning tokens before the final JSON; even with
-                # reasoning_effort="none" (see PROVIDER_PRESETS) a long/dense
-                # scenario prompt has been observed to still exhaust this and
-                # return a 400 json_validate_failed ("max completion tokens
-                # reached before generating a valid document") instead of ever
-                # finishing the JSON object.
-                max_completion_tokens=2048,
+                # Empirically sized from 62 successful judge responses across
+                # two real runs (18ba50e6, 52ae1e9e): p50 718 chars, p90 1259,
+                # p99 3319, one 8558-char outlier (~2140 tok, a single
+                # "thinking out loud" qwen3 response, 2.6x every other sample).
+                # 1700 covers p99 (~830 tok) with ~2x headroom while giving
+                # Groq's OTPM pre-flight check (1000 tok/min for this judge
+                # model) a per-request reservation it can actually admit — the
+                # prior 2048 was sized for the single outlier, not the
+                # distribution, and every request reserving against a 2048
+                # ceiling was getting burst-rejected ("Requested ~1800, Limit
+                # 1000") even on a cold window: 18/80 (22.5%) of scenario
+                # judgments across those two runs were lost to it (see
+                # docs/deferred_for_week5.md item 3). Doubling the true
+                # outlier instead (~4280) would raise the ceiling and make
+                # every request MORE likely to be rejected, not less — some
+                # judge models (e.g. Groq's qwen/qwen3.8-27b) emit hidden
+                # reasoning tokens before the final JSON, so a response this
+                # large can still exhaust 1700 and return a 400
+                # json_validate_failed rather than finishing the JSON object;
+                # that outcome is now correctly bucketed as judge_error too
+                # (see the `except APIError` branch below), just a different
+                # cause than the 429s this value is aimed at.
+                max_completion_tokens=1700,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
