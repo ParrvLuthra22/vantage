@@ -40,15 +40,29 @@ that needs the user, not something to fake or skip past silently. Whenever Neon/
 provisioned, `alembic upgrade head` against that `DATABASE_URL` is the entire remaining step —
 the migration itself is already written, reviewed, and proven correct against local Postgres.
 
-## 2. Skip the LLM judge on agent-side infrastructure failures
+## 2. ~~Skip the LLM judge on agent-side infrastructure failures~~ — FIXED, vantage `a73f675`
 
-Already true today, noted here so it isn't lost alongside the new item below: when
-`VesperAdapter` returns `PLANNER_FAILURE`, `ADAPTER_ERROR`, or a transient-error sentinel,
-`runner._run_one` still hands that output to the judge, which grades non-answers as if they
-were real routing decisions. A structural failure (router exhaustion, a crash in this
-adapter) isn't a quality question and shouldn't consume a judge call or produce a quality
-score at all — it should short-circuit straight to `passed=False` with a reason that says
-"infrastructure," distinguishable in reports from "the agent tried and was wrong."
+Was true until 2026-09-28: when `VesperAdapter` returned `PLANNER_FAILURE` or
+`ADAPTER_ERROR`, `runner._run_one` still handed that output to the judge, which graded
+non-answers as if they were real routing decisions. (This item's original text also
+mentioned "a transient-error sentinel" as a third case — there is no such distinct sentinel
+in the codebase; only these two exist.)
+
+**What made this concrete, not hypothetical**: the same morning's attempt to verify the
+Ollama fallback scoping fix (item 7) hit an exhausted Groq daily quota (item 5) and drove
+34/40 scenarios to `PLANNER_FAILURE`. Under the old behavior every one of those got judged —
+`adversarial_006` even scored 5.0 by coincidence, its "I'm having trouble" failure text
+happening to read as a defensible non-answer for an adversarial input. That run's 14.3%
+pass rate was contaminated twice over before this fix landed.
+
+**Done**: `ScenarioResult.infra_error: bool`, set by `runner._run_one` for either sentinel;
+the judge is never called when it's set; `aggregate_pass`/`_summarize` exclude it from the
+denominator the same way `known_failing`/`judge_error` are, with its own count. Real Postgres
+column (`eval_results.infra_error`, migration `568456394b5d`), not summary-only like
+`judge_error`. Verified with a real `orchestrator_v1` run against a deliberately invalid
+`GROQ_API_KEY`: scorecard correctly reported "Infra errors: 39, Failed: 0, Effective pass
+rate: 0.0% (0/0)" — honest "no data," not a misleading real-failure count — and judge cost
+stayed $0.0000.
 
 ## 3. Skip the LLM judge on judge-side infrastructure failures
 
@@ -166,7 +180,7 @@ attention. Fix is small (widen the column, or truncate/hash long descriptions be
 but needs a migration like item 1's; not done here since it's orthogonal to trajectory
 persistence.
 
-## 7. Groq/Ollama fallback ratio is now the dominant baseline variance source
+## 7. ~~Groq/Ollama fallback ratio is now the dominant baseline variance source~~ — Option (b) implemented, vesper `bd19fc5` + vantage `a73f675`
 
 Three fresh samples on identical code (`orchestrator_v1` baseline collection, 2026-09-28 —
 see `docs/baselines/orchestrator_v1_baseline_20260928.md`) produced 60.0% / 69.2% / 38.5%
@@ -202,3 +216,39 @@ currently surfaces prominently (`vantage eval compare` doesn't report it today).
 
 **This should be the first decision Week 5 makes**, before any further baseline collection or
 comparison against `a41a1d77` — it changes what every subsequent number actually measures.
+
+**Resolved 2026-09-28, option (b)**: `llm.fallback.purposes: ["reflection"]` in vesper's
+`config/settings.yaml`, enforced by `ModelRouter.complete()` (vesper `bd19fc5`) — Ollama is no
+longer attempted at all for `purpose="planning"`, the only purpose vantage's eval harness
+exercises; a Groq failure now returns `PLANNER_FAILURE` cleanly, which vantage's pipeline
+(`a73f675`, item 2) excludes from the pass-rate denominator rather than scoring it. Verified
+end to end with a bogus `GROQ_API_KEY`: zero Ollama calls, clean `PLANNER_FAILURE` across all
+retry attempts. `docs/baselines/orchestrator_v1_baseline_20260928.md`'s "Methodology change"
+section has the recomputation showing this has zero effect on the three existing samples
+(they predate the fix) and the plan for the first sample that exercises it for real.
+**"summarization" → "reflection"**: item 2's own earlier text (and this fix's initial task
+description) referenced a `purpose="summarization"` — no such purpose is called anywhere in
+the codebase. The one real, already-existing non-planning purpose is `"reflection"`
+(`proactive/reflection.py`'s background self-review), used instead.
+
+## 8. Pre-run Groq quota probe is insufficient — "probe passed, run wasted"
+
+Discovered 2026-09-28: a single cheap 10-token probe call to the planner model returned 200
+OK immediately before a real 40-scenario run — and the run still failed almost entirely,
+because the daily quota had only ~867 tokens of headroom left (199,133/200,000 used) at the
+moment the probe succeeded. The probe proves the endpoint is reachable and not currently
+rate-limited; it says nothing about whether there's enough *remaining* quota for the run
+about to start, since a single small request can fit in a gap too thin for the other ~39
+calls that follow it. Net effect: a real run gets launched, burns real wall-clock time and
+whatever quota is left, and produces unusable data — worse than not probing at all, since the
+probe's success created false confidence.
+
+**Better probe**: Groq's response headers (verified present on prior real calls — worth
+confirming the exact header names against a live response before relying on this, but the
+standard OpenAI-compatible convention is `x-ratelimit-remaining-tokens` and
+`x-ratelimit-remaining-requests`) should carry remaining-quota information without needing to
+trigger a 429 to see a "Used" figure. A HEAD or minimal request against the primary planner
+model, reading that header and aborting if remaining tokens fall under a real threshold
+(something like 40k, sized for a 40-scenario run's worst-case token use — the exact number
+needs the same "measure, don't guess" treatment as `max_completion_tokens` got in `322b6d1`)
+would catch this before wasting a run, not after.

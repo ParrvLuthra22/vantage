@@ -98,3 +98,45 @@ hallucination-detection and measurement-fix-validation exhibits this baseline si
 of, and [`docs/deferred_for_week5.md`](../deferred_for_week5.md) for the open items this
 session's fixes didn't close (Neon prod migration, the `eval_suites.description` truncation
 bug, and now this fallback-quality question).
+
+## Methodology change (2026-09-28, same day)
+
+Two more fixes landed the same day this baseline was marked, both aimed at closing the
+ambiguity in "Why sample 3 is the outlier" above before Week 5's judge-agreement work builds
+on top of this number:
+
+- **vesper `bd19fc5`**: Ollama's fallback is now scoped to `purposes: ["reflection"]` —
+  it is never attempted for `purpose="planning"` (the only purpose this suite exercises).
+  A Groq failure now returns `PLANNER_FAILURE` cleanly instead of silently routing through
+  the demonstrated-weaker `llama3.2:3b` (see
+  [`fallback_model_routing_degradation.md`](../interview_exhibits/fallback_model_routing_degradation.md)).
+  This is `docs/deferred_for_week5.md` item 7, option (b).
+- **vantage `a73f675`**: `PLANNER_FAILURE`/`ADAPTER_ERROR` outputs now skip the judge entirely
+  and are excluded from the pass-rate denominator (`ScenarioResult.infra_error`), the same way
+  `known_failing`/`judge_error` already were. Without this, scoping the fallback away from
+  planning would have traded one measurement problem for another: a Groq outage would produce
+  `PLANNER_FAILURE`s that still got judged and counted as real failures (confirmed the same
+  morning — a verification attempt hit an exhausted Groq daily quota and drove 34/40 scenarios
+  to `PLANNER_FAILURE`, one of which scored 5.0 by coincidence before this fix). This is
+  `docs/deferred_for_week5.md` item 2.
+
+**Recomputing the three samples above under both fixes** (`scripts/
+recompute_baseline_under_new_methodology.py`, which queries Postgres rather than spending
+Groq tokens on a fresh run) shows **zero effect on the numbers already reported**:
+
+| Run | Old (stored) | New (infra_error also excluded) | infra-sentinel candidates |
+|---|---|---|---|
+| `a41a1d77` (baseline) | 60.0% (18/30) | 60.0% (18/30) | 0 |
+| `28c70401` | 69.2% (27/39) | 69.2% (27/39) | 0 |
+| `5124cac4` | 38.5% (15/39) | 38.5% (15/39) | 0 |
+
+This is expected, not a validation gap: all three samples were collected *before* `bd19fc5`
+landed that same morning, so every Groq failure that day was still rescued (however badly) by
+the unscoped fallback — none of the three ever actually produced a `PLANNER_FAILURE`/
+`ADAPTER_ERROR` sentinel for the new methodology to exclude. **The 60.0% median above remains
+the historical, canonical baseline, unmarked and unchanged** — this section documents that the
+methodology under it has since improved, not that the number itself moved.
+
+**Next**: one fresh sample scheduled for 2026-09-29 09:00 local, the first to run under both
+fixes together — the first genuinely clean measurement this suite has had. It will **not** be
+marked as baseline; `a41a1d77` remains canonical until a deliberate decision to replace it.
