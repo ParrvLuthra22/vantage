@@ -90,8 +90,16 @@ Thumbs.db
 !docs/baselines/*.log
 
 # Vesper's own local trace/audit output, written relative to CWD when
-# running evals against --adapter vesper
-packages/eval_engine/data/
+# running evals against --adapter vesper. `data/*` (not `data/`) so the two
+# gold-set exceptions below can actually take effect — git cannot re-include
+# a file whose PARENT DIRECTORY itself matched an exclude pattern, only one
+# whose individual entry did.
+packages/eval_engine/data/*
+# ...except the gold-set labeling files — deliberately curated, committed
+# source data for Week 5's judge-quality measurement, not Vesper runtime
+# noise. See docs/gold_set_methodology.md.
+!packages/eval_engine/data/gold_candidates.jsonl
+!packages/eval_engine/data/gold_labels_v1.jsonl
 
 # LLM judge fine-tuning data (scripts/collect_judge_traces.py): large,
 # regenerable, not source. data/README.md documents it and IS tracked.
