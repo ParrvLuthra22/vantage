@@ -33,10 +33,22 @@ separate concrete cases of that pattern, not one lucky catch.
   measurement gap rather than just re-scaling noise — and that it corrects false negatives
   (this exhibit) as well as false positives (the three hallucination exhibits above).
 
+## Fallback model quality (1 exhibit, 3 scenarios)
+
+- [`fallback_model_routing_degradation.md`](fallback_model_routing_degradation.md) —
+  `clear_002`, `clear_008`, `out_of_scope_006`. When Groq's primary planner is throttled hard
+  enough to push a turn onto Vesper's local Ollama fallback, `llama3.2:3b`'s routing quality is
+  materially worse, not just marginally noisier — including one case (`out_of_scope_006`)
+  where it routed "turn off the lights" to `git_diff`, a version-control tool, then
+  hallucinated success. Each scenario is contrasted against the same input handled cleanly by
+  Groq in a different sample. Direct evidence behind `docs/deferred_for_week5.md` item 7: the
+  Groq/fallback ratio, not code changes, is now the dominant source of variance between eval
+  samples.
+
 ## What these support in an interview
 
-- **"How do you know your eval infrastructure catches real bugs?"** → these four exhibits,
-  three of them independent instances of the same failure class.
+- **"How do you know your eval infrastructure catches real bugs?"** → these five exhibits,
+  three of them independent instances of the same hallucination failure class.
 - **"How did you validate that a measurement change was correct, not just a re-scaling of
   noise?"** → the A/B evidence file — same behavior, same rubric, same judge model, opposite
   verdicts, explained entirely by what the judge could see.
@@ -45,6 +57,9 @@ separate concrete cases of that pattern, not one lucky catch.
   separate real runs producing word-for-word identical scoring reasoning is a strong signal
   the judge is reasoning from incomplete, deterministic input rather than actually observing
   the agent.
+- **"Why does your baseline number have a range instead of a point estimate?"** → the fallback
+  model quality exhibit — the range isn't measurement noise, it's a real, explained mixture of
+  two different models doing the routing depending on Groq's load that morning.
 
 ## What's NOT here (and why)
 
@@ -63,8 +78,8 @@ below is a placeholder.
 - [x] `hallucination_clear_005_email.md` (`clear_005`)
 - [x] `hallucination_clear_009_reminder.md` (`clear_009`)
 - [x] `measurement_fix_ab_evidence.md` (`context_dependent_004`)
+- [x] `fallback_model_routing_degradation.md` (`clear_002`, `clear_008`, `out_of_scope_006`)
 
-Candidate future exhibit, not yet written: the 2026-09-28 baseline run itself
-(`docs/baselines/orchestrator_v1_baseline_20260928.md`, once that run completes) — "how a
-real baseline gets marked, including the honest range across samples" is a different story
-than any exhibit above and would deserve its own entry here once it exists.
+No candidate exhibits currently pending. The 2026-09-28 baseline run referenced above is now
+`docs/baselines/orchestrator_v1_baseline_20260928.md`, and its most interview-relevant finding
+(the fallback-model quality gap) already has its own exhibit, linked above.

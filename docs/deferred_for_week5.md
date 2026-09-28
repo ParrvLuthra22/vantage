@@ -165,3 +165,40 @@ only `persist_run`'s logged warning, which nothing currently surfaces to a CI lo
 attention. Fix is small (widen the column, or truncate/hash long descriptions before storing)
 but needs a migration like item 1's; not done here since it's orthogonal to trajectory
 persistence.
+
+## 7. Groq/Ollama fallback ratio is now the dominant baseline variance source
+
+Three fresh samples on identical code (`orchestrator_v1` baseline collection, 2026-09-28 —
+see `docs/baselines/orchestrator_v1_baseline_20260928.md`) produced 60.0% / 69.2% / 38.5%
+adjusted pass rates: run `a41a1d77` (baseline, marked), `28c70401`, and `5124cac4`. Those
+numbers correlate directly with each run's count of Ollama fallback invocations: 12, 17, and
+**53** respectively. **Sample 2 (`28c70401`, n_fallback=17, judge_error=0) is the cleanest
+snapshot of Vesper's actual routing quality available so far — every other sample is measuring
+some mixture of Vesper-on-Groq and Vesper-on-`llama3.2:3b`,** and the mixture ratio is itself
+driven by how hard Groq happened to be throttling that morning, not by anything about the code
+under test.
+
+Concrete evidence the fallback model's routing is materially worse, not just marginally
+noisier: `docs/interview_exhibits/fallback_model_routing_degradation.md` — three scenarios
+from the 53-fallback sample where `llama3.2:3b` routed to `git_diff` for "turn off the lights"
+(then hallucinated success), `run_shell` for a unit conversion the LLM could answer directly,
+and `current_weather` with a broken location entity — each contrasted against the same
+scenario handled cleanly by Groq in the baseline sample.
+
+**Options, in the order Week 5 should evaluate them**:
+(a) **Upgrade Groq to Developer tier** (~$10-30/mo) for materially more TPM/TPD headroom —
+would collapse most fallback hits to zero and stabilize the number directly, at the cost of a
+recurring bill for what's currently a $0 eval pipeline.
+(b) **Scope the fallback narrower** — never route to Ollama for `purpose="planning"` specifically
+(Vesper's `ModelRouter._resolve_tier` already supports per-purpose overrides; see
+`config/settings.yaml`'s `purposes:` block), since `llama3.2:3b`'s routing decisions are the
+demonstrated weak point, not its chat-purpose replies. Keeps the $0 cost, accepts that a
+Groq-planning outage has no rescue path (a regression from the fix that made this session
+possible, so this is a real trade-off, not a free option).
+(c) **Accept the variance and always report a range, not a point** — cheapest to implement
+(the baseline doc already does this), but means the pass-rate number can't be trusted for
+small regressions without also checking each comparison run's fallback count, which nothing
+currently surfaces prominently (`vantage eval compare` doesn't report it today).
+
+**This should be the first decision Week 5 makes**, before any further baseline collection or
+comparison against `a41a1d77` — it changes what every subsequent number actually measures.
