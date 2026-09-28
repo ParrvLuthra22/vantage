@@ -85,6 +85,9 @@ Thumbs.db
 # Logs / local databases
 *.log
 *.sqlite3
+# ...except docs/baselines/ exhibits — intentionally committed evidence, not
+# throwaway debug output (referenced from README.md and docs/interview_exhibits/).
+!docs/baselines/*.log
 
 # Vesper's own local trace/audit output, written relative to CWD when
 # running evals against --adapter vesper

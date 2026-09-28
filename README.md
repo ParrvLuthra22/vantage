@@ -11,8 +11,11 @@ Vantage gives you a trace tree, cost tracking, and evaluation pipeline for any P
 LLM agent. Built for teams that want LangSmith-style observability without sending
 traces to a third party.
 
-> **Status:** Week 1 of build. The trace pipeline below works end to end today; the
-> evaluation pipeline and dashboard are on the roadmap. See [Roadmap](#roadmap).
+> **Status:** Trace pipeline, evaluation pipeline (deterministic + LLM-judge scoring,
+> Postgres-backed run history, regression detection), and dashboard all run end to end
+> today against a real agent (Vesper). Current focus is Week 5: judge/agent
+> infrastructure-failure handling, a human-labeling workflow, and production deployment.
+> See [Roadmap](#roadmap) and [Eval baseline](#eval-baseline).
 
 ## Quick start
 
@@ -41,7 +44,7 @@ curl http://localhost:8000/health
 ### 2. Instrument your agent
 
 ```bash
-pip install vantage-observability   # imported as `vantage`
+pip install vantage-observability   # imported as `vantage` — see note below if this 404s
 ```
 
 ```python
@@ -98,6 +101,15 @@ There is a runnable reference agent in
 [`examples/vesper_integration/`](examples/vesper_integration/) and a verification
 script at `scripts/verify_week1.sh`.
 
+## Install (SDK)
+
+```bash
+pip install vantage-observability
+```
+
+*Note: PyPI publication pending as of 2026-09-27. Until published, install from source:*
+`pip install git+https://github.com/ParrvLuthra22/vantage.git#subdirectory=packages/sdk`
+
 ## Architecture
 
 ```
@@ -128,16 +140,36 @@ buffered spans.
 Full write-up — data model, ingest flow, and the reasoning behind each choice — in
 [`docs/architecture.md`](docs/architecture.md).
 
+## Eval baseline
+
+Current `orchestrator_v1` baseline (real Vesper, Groq judge, 2026-09-28): **60.0% adjusted
+pass rate** (18/30, after excluding judge-infrastructure and known-failing scenarios from the
+denominator), with a 38.5%–69.2% range across the three samples collected that morning — the
+median, not the best sample, is what's marked. See
+[`docs/baselines/orchestrator_v1_baseline_20260928.md`](docs/baselines/orchestrator_v1_baseline_20260928.md)
+for the full methodology, why the range is that wide (real, explained variance in how much of
+a run falls back to a weaker local model under Groq load — not measurement noise), and
+[`docs/interview_exhibits/README.md`](docs/interview_exhibits/README.md) for concrete
+evidence of what the eval infrastructure has caught in real runs.
+
 ## Roadmap
 
 - [x] **Week 1** — Trace pipeline. Postgres schema, FastAPI ingest and query API,
       batched SDK exporter, `@trace`/`span()` instrumentation, reference integration.
-- [ ] **Week 2** — Alembic migrations, replacing `create_all`. Trace completion
-      (`end_time`, error status) and retention.
-- [ ] **Week 3** — Evaluation pipeline: scorers, datasets, and offline runs.
-- [ ] **Week 4** — Dashboard: trace waterfall, cost breakdowns, project views.
-- [ ] **Week 5** — Search and filtering over JSONB attributes; latency percentiles.
-- [ ] **Week 6** — Full documentation site and deployment guides.
+- [x] **Week 2** — Alembic migrations, replacing `create_all`. Trace completion
+      (`end_time`, error status) via rollup logic.
+- [x] **Week 3** — Evaluation pipeline: deterministic + LLM-judge scoring, Postgres-backed
+      suite/run/result history, regression detection, `vantage eval run|compare` CLI —
+      substantially past the original scope of this week once real-agent integration
+      (Vesper) surfaced how much a real judge and a real adapter actually need.
+- [x] **Week 4** — Dashboard: trace views, eval-run list and detail views (pass rate,
+      known-failing and judge-error breakdowns), baseline management.
+- [ ] **Week 5** (in progress) — Judge- and agent-side infrastructure-failure handling,
+      real-Vesper integration hardening (Ollama fallback, Groq quota limits), trajectory
+      persistence for a human-labeling workflow, and a first real baseline. See
+      [`docs/deferred_for_week5.md`](docs/deferred_for_week5.md) for the open items.
+- [ ] **Week 6** — PyPI publish, production deployment (Railway + Neon), full
+      documentation site.
 
 ## Contributing
 
