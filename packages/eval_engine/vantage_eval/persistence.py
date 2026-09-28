@@ -174,6 +174,7 @@ def _build_result(run_row: EvalRun, scenario_row: EvalScenario, result) -> EvalR
         tool_sequence=list(result.output.tool_sequence),
         tool_calls=[dict(c) for c in result.output.tool_calls],
         final_reply=result.output.final_reply,
+        infra_error=result.infra_error,
     )
 
 

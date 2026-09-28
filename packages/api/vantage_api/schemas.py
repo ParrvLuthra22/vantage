@@ -123,6 +123,7 @@ class EvalResultOut(BaseModel):
     tool_sequence: Optional[list[str]] = None
     tool_calls: Optional[list[dict[str, Any]]] = None
     final_reply: Optional[str] = None
+    infra_error: bool = False
 
 
 class EvalRunOut(BaseModel):

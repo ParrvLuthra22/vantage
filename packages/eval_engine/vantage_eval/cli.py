@@ -348,6 +348,9 @@ def _print_scorecard(run, console: Console):
     table.add_row(
         "Judge errors", f"[blue]{s.judge_error}[/blue]" if s.judge_error else "0"
     )
+    table.add_row(
+        "Infra errors", f"[cyan]{s.infra_error}[/cyan]" if s.infra_error else "0"
+    )
     table.add_row("Passed", f"[green]{s.passed}[/green]")
     table.add_row("Failed", f"[red]{s.failed}[/red]" if s.failed else "0")
     table.add_row("Effective pass rate", f"{s.pass_rate:.1%} ({s.passed}/{s.total})")
@@ -361,7 +364,7 @@ def _print_scorecard(run, console: Console):
         console.print()
         console.print("[bold red]Failed scenarios:[/bold red]")
         for r in run.results:
-            if not r.known_failing and not r.judge_error and not r.passed:
+            if not r.known_failing and not r.judge_error and not r.infra_error and not r.passed:
                 reasons = "; ".join(_failure_reasons(r)) or "unknown"
                 console.print(f"  [red]✗[/red] {r.external_id}: {reasons}")
 
@@ -380,6 +383,15 @@ def _print_scorecard(run, console: Console):
         for r in run.results:
             if r.judge_error and not r.known_failing:
                 console.print(f"  [blue]◌[/blue] {r.external_id}: {r.llm_judge_reasoning}")
+
+    if s.infra_error > 0:
+        console.print()
+        console.print("[bold cyan]Infra errors (excluded from pass rate):[/bold cyan]")
+        for r in run.results:
+            if r.infra_error and not r.known_failing:
+                console.print(
+                    f"  [cyan]⊘[/cyan] {r.external_id}: routed_agent={r.output.routed_agent}"
+                )
 
 
 def _failure_reasons(r) -> list[str]:

@@ -310,6 +310,17 @@ class EvalResult(Base):
     tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
     final_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # True when the AGENT's own output was an infrastructure sentinel
+    # (routed_agent == "PLANNER_FAILURE"/"ADAPTER_ERROR") rather than a
+    # routing decision — no judge call was made, no llm_judge_score exists,
+    # and this row is excluded from the suite's pass-rate denominator (see
+    # ScenarioResult.infra_error). Distinguishes "the agent's infrastructure
+    # broke" from "the agent tried and was wrong" in queries and reports,
+    # unlike per-result judge_error, which lives only in the run-level
+    # summary JSONB, not its own column here — see docs/deferred_for_week5.md
+    # item 2.
+    infra_error: Mapped[bool] = mapped_column(Boolean, default=False)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )

@@ -125,9 +125,21 @@ class ScenarioResult(BaseModel):
     llm_judge_score stays None in this case rather than a clamped 0.0, so it
     can't be mistaken for a real score."""
 
+    infra_error: bool = False
+    """Set by runner._run_one when the AGENT's own output is an infrastructure
+    sentinel (routed_agent == "PLANNER_FAILURE" or "ADAPTER_ERROR") — the
+    adapter/agent-under-test's own tooling broke this turn, not a routing
+    decision to grade. The opposite end of the pipeline from judge_error: that
+    one is the judge's infrastructure failing, this one is the agent's. The
+    LLM judge is never called for a scenario flagged this way (no quality
+    score exists to launder), and it's excluded from the pass-rate
+    denominator the same way known_failing/judge_error are. Deterministic
+    checks still run — a hard-check "expected X, got PLANNER_FAILURE" detail
+    is legitimate diagnostic signal, it just doesn't count toward pass/fail."""
+
     def aggregate_pass(self, min_llm_score: float = 4.0) -> bool:
         """Compute overall pass/fail from component scores."""
-        if self.judge_error:
+        if self.judge_error or self.infra_error:
             return False  # no verdict was reached; excluded from the denominator anyway
         if any(not r.passed for r in self.deterministic_results):
             return False
@@ -155,6 +167,12 @@ class SuiteRunSummary(BaseModel):
     judge's own API call failed or returned nothing — see
     ScenarioResult.judge_error. Distinct from known_failing: this is
     infrastructure noise, not a documented agent gap."""
+    infra_error: int = 0
+    """Count of scenarios excluded from total/passed/failed because the
+    AGENT's own output was an infrastructure sentinel (PLANNER_FAILURE /
+    ADAPTER_ERROR) — see ScenarioResult.infra_error. The agent-side twin of
+    judge_error: that's the judge's infrastructure failing, this is the
+    agent-under-test's."""
     avg_llm_score: Optional[float] = None
     total_judge_cost_usd: float = 0.0
     duration_seconds: float = 0.0

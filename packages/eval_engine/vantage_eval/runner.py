@@ -58,6 +58,8 @@ def run_suite(
                     mark, style = "⚠", "yellow"
                 elif result.judge_error:
                     mark, style = "◌", "blue"
+                elif result.infra_error:
+                    mark, style = "⊘", "cyan"
                 else:
                     mark, style = ("✓", "green") if result.passed else ("✗", "red")
                 console.print(
@@ -71,6 +73,12 @@ def run_suite(
     run.finished_at = finished
     run.summary = _summarize(run.results, duration, judge.total_cost_usd if judge else 0.0)
     return run
+
+
+#: routed_agent sentinels meaning the AGENT's own infrastructure broke this
+#: turn (router exhaustion, an uncaught crash in the adapter) rather than a
+#: routing decision worth grading. See ScenarioResult.infra_error.
+INFRA_ERROR_SENTINELS = frozenset({"PLANNER_FAILURE", "ADAPTER_ERROR"})
 
 
 def _run_one(
@@ -97,7 +105,14 @@ def _run_one(
         result.latency_within_budget = output.latency_ms <= scenario.rubric.latency_budget_ms
 
     det_scorer.score(scenario, output, result)
-    if judge is not None:
+
+    if output.routed_agent in INFRA_ERROR_SENTINELS:
+        # A structural failure isn't a quality question — never spend a judge
+        # call on it, and never let a judge's incidental score on failure text
+        # (e.g. an adversarial scenario's "I'm having trouble" reading as a
+        # defensible non-answer) launder it into a real verdict.
+        result.infra_error = True
+    elif judge is not None:
         judge.score(scenario, output, result)
 
     return result
@@ -110,10 +125,16 @@ def _summarize(
 ) -> SuiteRunSummary:
     total_scenarios = len(results)
     known_failing_results = [r for r in results if r.known_failing]
-    # A scenario can be both known_failing and judge_error; count it under
-    # known_failing only so the two exclusion buckets don't double-count it.
+    # A scenario can be both known_failing and judge_error/infra_error; count
+    # it under known_failing only so the exclusion buckets don't double-count
+    # it. judge_error and infra_error are already mutually exclusive by
+    # construction (runner._run_one never calls the judge for an infra_error
+    # scenario, so it can never also become judge_error).
     judge_error_results = [r for r in results if r.judge_error and not r.known_failing]
-    effective_results = [r for r in results if not r.known_failing and not r.judge_error]
+    infra_error_results = [r for r in results if r.infra_error and not r.known_failing]
+    effective_results = [
+        r for r in results if not r.known_failing and not r.judge_error and not r.infra_error
+    ]
 
     total = len(effective_results)
     passed = sum(1 for r in effective_results if r.passed)
@@ -133,6 +154,7 @@ def _summarize(
         total_scenarios=total_scenarios,
         known_failing=len(known_failing_results),
         judge_error=len(judge_error_results),
+        infra_error=len(infra_error_results),
         avg_llm_score=avg_llm,
         total_judge_cost_usd=judge_cost,
         duration_seconds=duration_s,
