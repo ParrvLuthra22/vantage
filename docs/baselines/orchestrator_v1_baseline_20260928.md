@@ -137,6 +137,13 @@ the unscoped fallback — none of the three ever actually produced a `PLANNER_FA
 the historical, canonical baseline, unmarked and unchanged** — this section documents that the
 methodology under it has since improved, not that the number itself moved.
 
+**The zero delta is itself a substantive finding, not just a null result.** Yesterday's
+unscoped Ollama fallback meant Groq failures were rescued by `llama3.2:3b` decisions that
+still counted as scenarios in the denominator — the `PLANNER_FAILURE` sentinel item 2's fix
+acts on essentially never fired under the old fallback config. Tomorrow's sample is therefore
+the first measurement under a pipeline that cleanly distinguishes "Vesper couldn't decide"
+from "Vesper decided wrong."
+
 **Next**: one fresh sample scheduled for 2026-09-29 09:00 local, the first to run under both
 fixes together — the first genuinely clean measurement this suite has had. It will **not** be
 marked as baseline; `a41a1d77` remains canonical until a deliberate decision to replace it.

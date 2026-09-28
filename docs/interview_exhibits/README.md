@@ -45,6 +45,17 @@ separate concrete cases of that pattern, not one lucky catch.
   Groq/fallback ratio, not code changes, is now the dominant source of variance between eval
   samples.
 
+## Quota-aware CI (1 exhibit)
+
+- [`quota_aware_ci.md`](quota_aware_ci.md) — a cheap pre-run quota probe passed with 867
+  tokens of real headroom left and still let a doomed 40-scenario run start. Measuring real
+  full-run token cost (60k-79k across three clean samples) showed the first proposed fix
+  threshold (~40k) was itself an unverified guess, about half of what's actually needed —
+  the same "measure, don't guess" discipline applied a second time, to the fix for a
+  measurement problem. Direct evidence for why eval-gate CI needs a real remaining-quota
+  check, not a binary probe: a probe that can pass on empty is a false-negative generator
+  once gating is live, not just a wasted local run.
+
 ## What these support in an interview
 
 - **"How do you know your eval infrastructure catches real bugs?"** → these five exhibits,
@@ -79,6 +90,7 @@ below is a placeholder.
 - [x] `hallucination_clear_009_reminder.md` (`clear_009`)
 - [x] `measurement_fix_ab_evidence.md` (`context_dependent_004`)
 - [x] `fallback_model_routing_degradation.md` (`clear_002`, `clear_008`, `out_of_scope_006`)
+- [x] `quota_aware_ci.md` (quota probe / threshold measurement)
 
 No candidate exhibits currently pending. The 2026-09-28 baseline run referenced above is now
 `docs/baselines/orchestrator_v1_baseline_20260928.md`, and its most interview-relevant finding

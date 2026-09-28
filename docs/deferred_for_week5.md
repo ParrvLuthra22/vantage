@@ -243,12 +243,18 @@ calls that follow it. Net effect: a real run gets launched, burns real wall-cloc
 whatever quota is left, and produces unusable data — worse than not probing at all, since the
 probe's success created false confidence.
 
-**Better probe**: Groq's response headers (verified present on prior real calls — worth
-confirming the exact header names against a live response before relying on this, but the
-standard OpenAI-compatible convention is `x-ratelimit-remaining-tokens` and
-`x-ratelimit-remaining-requests`) should carry remaining-quota information without needing to
-trigger a 429 to see a "Used" figure. A HEAD or minimal request against the primary planner
-model, reading that header and aborting if remaining tokens fall under a real threshold
-(something like 40k, sized for a 40-scenario run's worst-case token use — the exact number
-needs the same "measure, don't guess" treatment as `max_completion_tokens` got in `322b6d1`)
-would catch this before wasting a run, not after.
+**Better probe**: Groq's response headers (worth confirming the exact header names against a
+live response before relying on this — not yet done — but the standard OpenAI-compatible
+convention is `x-ratelimit-remaining-tokens` and `x-ratelimit-remaining-requests`) should carry
+remaining-quota information without needing to trigger a 429 to see a "Used" figure. A HEAD or
+minimal request against the primary planner model, reading that header and aborting if
+remaining tokens fall under a real threshold, would catch this before wasting a run, not after.
+
+**Threshold measured, not guessed**: summing every successful planner call's
+`tokens_in + tokens_out` across the three clean 2026-09-28 baseline samples gives a real full
+`orchestrator_v1` run's actual cost — 75,645 / 78,926 / 59,772 tokens (`a41a1d77` / `28c70401`
+/ `5124cac4`). A first draft of this item guessed "~40k" before that data existed; the real
+worst case (~79k) is roughly double that guess, so 40k would have let a run start with barely
+half the headroom it needs, reproducing this exact failure mode at a smaller scale. Corrected
+threshold: **abort below ~85,000 remaining tokens**. Full writeup with the per-run numbers:
+`docs/interview_exhibits/quota_aware_ci.md`.
