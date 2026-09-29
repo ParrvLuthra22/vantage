@@ -147,3 +147,32 @@ from "Vesper decided wrong."
 **Next**: one fresh sample scheduled for 2026-09-29 09:00 local, the first to run under both
 fixes together — the first genuinely clean measurement this suite has had. It will **not** be
 marked as baseline; `a41a1d77` remains canonical until a deliberate decision to replace it.
+
+## First clean sample under both fixes (2026-09-29)
+
+Run `cbf124f7-51cd-40d4-8274-bce8962f61e9` — real Vesper, Groq judge, both fixes active
+(vesper `bd19fc5`, vantage `a73f675`). Quota check beforehand used Groq's
+`x-ratelimit-remaining-tokens` header as planned, but that header turned out to expose only
+the per-minute (TPM, 8000 max) window, not the daily (TPD, 200,000 max) one that actually
+caused the 2026-09-28 confounded run — no daily-scoped header exists at all. Fell back to the
+cheap-probe method per the task's own contingency, and watched the first 5 minutes of the run
+for "tokens per day" 429s before letting it continue unattended; none appeared.
+
+- **Raw pass rate**: 67.5% (27/40)
+- **Adjusted pass rate**: 71.1% (27/38)
+- **judge_error**: 0
+- **infra_error**: 1 (`ambiguous_004` — a single `PLANNER_FAILURE`, cleanly excluded rather
+  than scored)
+- **known_failing**: 1 (`clear_010`, still failing — consistent with every prior sample)
+- **Ollama fallback hits**: 0 (confirms `bd19fc5`'s purpose scoping — zero attempts for
+  `purpose="planning"`, as designed)
+
+**Interpretation**: 71.1% sits close to sample 2's 69.2% — the run identified in item 7 as
+the cleanest snapshot available before these fixes existed, on the basis of it happening to
+have the fewest fallback hits (17) of the three 2026-09-28 samples. This sample has zero
+fallback hits by construction rather than by chance, and lands in the same range, which is
+consistent with sample 2 having been a reasonably good proxy for Vesper's real quality all
+along — the fallback was the source of the *variance* (as low as 38.5%, as high as 69.2%),
+not necessarily of a large *bias* in the cleanest available sample. One sample is not enough
+to confirm that on its own; it's the first data point under the corrected pipeline, not a
+replacement for the existing median-of-three baseline.
